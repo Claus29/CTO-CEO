@@ -155,3 +155,54 @@ def test_prepare_update_backs_up_with_counts(layout, admin, server):
     info = app.prepare_update()
     assert info["counts"]["incidents"] == 1 and (layout.backups_dir / info["backup"]).exists()
     assert "previa-actualizacion" in info["backup"]
+
+
+def test_import_from_backup_zip(layout, tmp_path, admin, server):
+    new_incident(admin, title="Viene de una copia")
+    info = admin.post("/api/backups", {})
+    zip_path = layout.backups_dir / (info.get("item") or info)["name"]
+    server.shutdown(backup=False)
+    copy = tmp_path / "copia.zip"
+    shutil.copy(zip_path, copy)
+    for p in server.data_dir.glob(DB_NAME + "*"):
+        p.unlink()
+    app = start(layout, import_from=copy)
+    try:
+        health = Client(app.base).get("/api/health")
+        assert not health["recovery"] and health["imported"]["incidents"] == 1
+        titles = [i["title"] for i in Client(app.base).login("ana", ADMIN_PASSWORD).get("/api/incidents")["items"]]
+        assert titles == ["Viene de una copia"]
+    finally:
+        app.shutdown(backup=False)
+
+
+def test_never_imports_over_existing_data(admin, server, layout, tmp_path):
+    new_incident(admin, title="Datos actuales")
+    server.shutdown(backup=False)
+    app = start(layout, import_from=V1_DB)
+    try:
+        health = Client(app.base).get("/api/health")
+        assert health["imported"] is None
+        titles = [i["title"] for i in Client(app.base).login("ana", ADMIN_PASSWORD).get("/api/incidents")["items"]]
+        assert titles == ["Datos actuales"]
+    finally:
+        app.shutdown(backup=False)
+
+
+def test_failed_import_opens_recovery_instead_of_empty(layout, tmp_path):
+    bad = tmp_path / "no-es-una-copia.zip"
+    bad.write_bytes(b"esto no es un zip")
+    app = start(layout, import_from=bad)
+    try:
+        health = Client(app.base).get("/api/health")
+        assert health["recovery"] and "No se pudieron recuperar" in health["recovery_reason"]
+        assert not (app.data_dir / DB_NAME).exists()
+    finally:
+        app.shutdown(backup=False)
+
+
+def test_empty_import_path_is_ignored(layout):
+    from devcontrol.desktop import App
+    with open(layout.install_file, "a", encoding="utf-8") as fh:
+        fh.write("importar_desde =\n")
+    assert App(layout, headless=True)._import_path() is None

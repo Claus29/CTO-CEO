@@ -13,8 +13,11 @@ El anfitrión guarda la base de datos y ejecuta el servidor del equipo. Debe est
 
 1. Ejecuta `DEVCONTROL-Setup-<versión>.exe` y elige **Anfitrión**.
 2. Marca **Abrir DEV CONTROL al iniciar Windows**.
-3. Si usabas la versión 1, indica su carpeta: se importarán incidencias, tareas, mensajes y adjuntos
-   (los identificadores antiguos pasan al prefijo `INC-`, y las referencias en los textos se actualizan).
+3. Solo si tienes datos anteriores que recuperar, marca **«Tengo datos de la versión anterior y quiero
+   recuperarlos»** y elige en la pantalla siguiente la carpeta del programa anterior (la que contiene `datos`), una
+   base de datos `.db` o una copia `.zip`. Si no la marcas, no se pide nada. Los datos se recuperan la primera vez
+   que se abre el programa y solo si en ese equipo aún no hay datos (los identificadores de la versión 1 pasan al
+   prefijo `INC-` y las referencias en los textos se actualizan).
 4. Al abrirse, crea la cuenta de **administrador** y el primer proyecto (su prefijo numera las incidencias: `INC-001`).
 5. Windows puede preguntar si permites a DEV CONTROL comunicarse en redes privadas: acepta. Si no lo preguntó y los
    demás no pueden conectar, usa **Permitir en el Firewall de Windows** en el menú del icono de la bandeja.

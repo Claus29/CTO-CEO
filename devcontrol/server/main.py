@@ -101,17 +101,31 @@ class ServerApp:
         self.db: Database | None = None
         self.recovery: dict | None = None
         self.router = Router()
+        self.import_summary: dict | None = None
+        import_error, did_import = "", False
         if not self.db_path.exists() and import_from and Path(import_from).is_file():
-            # Datos de la versión 1 elegidos en el instalador (su base de datos .db o una copia .zip).
-            self.restore_into_empty(Path(import_from))
-            self.log.info("Datos importados desde %s", import_from)
-        if not self.db_path.exists() and self.backups.list():
+            # Datos anteriores elegidos en el instalador (base de datos .db o copia .zip). Solo si aún no hay datos.
+            try:
+                self.restore_into_empty(Path(import_from))
+                did_import = True
+            except (BackupError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
+                import_error = str(exc)
+                self.log.error("No se pudieron importar los datos de %s: %s", import_from, exc)
+                for p in self.data_dir.glob(DB_NAME + "*"):
+                    p.unlink(missing_ok=True)
+        if import_error:
+            self.recovery = {"reason": f"No se pudieron recuperar los datos de {import_from}: {import_error} "
+                                       "Elige otra copia o el archivo correcto."}
+            self._register_recovery()
+        elif not self.db_path.exists() and self.backups.list():
             self.recovery = {"reason": "Falta la base de datos, pero hay copias de seguridad en "
                                        f"{self.layout.backups_dir}. Elige una para restaurarla."}
             self.log.warning("No existe %s y hay copias de seguridad: modo recuperación", self.db_path)
             self._register_recovery()
         else:
             self._open()
+            if did_import:
+                self._record_import(Path(import_from))
 
     # -- arranque de la base de datos ----------------------------------------------------
     def _open(self) -> None:
@@ -127,6 +141,15 @@ class ServerApp:
         self._register_core()
         for module in MODULES:
             module.register(self.router, self)
+
+    def _record_import(self, source: Path) -> None:
+        counts = {t: self.db.scalar(f"SELECT COUNT(*) FROM {t}") for t in ("incidents", "tasks", "messages", "users")}
+        self.import_summary = {"source": source.name, **counts}
+        text = (f"Datos anteriores recuperados desde {source.name}: {counts['incidents']} incidencias, "
+                f"{counts['tasks']} tareas, {counts['messages']} mensajes y {counts['users']} usuarios")
+        with self.db.tx() as c:
+            log_activity(self.db, c, None, "system", None, None, "import", text)
+        self.log.info(text)
 
     def _backup_before_migration(self, db: Database, version: int) -> None:
         self.backups.db = db
@@ -344,7 +367,8 @@ class ServerApp:
             out.update(recovery=True, recovery_reason=self.recovery["reason"], setup_required=False, epoch=None)
         else:
             out.update(recovery=False, epoch=self.db.epoch,
-                       setup_required=not self.db.scalar("SELECT COUNT(*) FROM users"))
+                       setup_required=not self.db.scalar("SELECT COUNT(*) FROM users"),
+                       imported=self.import_summary)
         return out
 
     def _internal_shutdown(self, req):

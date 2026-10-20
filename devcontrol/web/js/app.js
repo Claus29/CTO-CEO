@@ -599,6 +599,11 @@ async function boot() {
     if (local.is_host_server) return showSetup(local);
     return showLogin('Este servidor aún no está configurado. Abre DEV CONTROL en el equipo anfitrión para crear el administrador.', local);
   }
+  if (health?.imported && !loadJSON(`dc.importShown.${health.epoch}`, false)) {
+    saveJSON(`dc.importShown.${health.epoch}`, true);
+    const i = health.imported;
+    toast(`Datos anteriores recuperados desde ${i.source}: ${i.incidents} incidencias, ${i.tasks} tareas, ${i.messages} mensajes y ${i.users} usuarios.`, 'ok', { sticky: true, title: 'Recuperación completada' });
+  }
   if (api.token) return start();
   showLogin(health ? null : (local.last_error || 'No se puede conectar con el servidor. Comprueba la dirección o pulsa «Probar conexión».'), local);
 }

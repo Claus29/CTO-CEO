@@ -3,7 +3,8 @@
 ;
 ; * Se instala para el usuario actual (sin permisos de administrador).
 ; * Pregunta si este equipo es el ANFITRIÓN (guarda los datos) o un MIEMBRO (se conecta a un anfitrión),
-;   permite probar la conexión con el servidor y, opcionalmente, importar los datos de la versión 1.
+;   permite probar la conexión con el servidor y, solo si se marca la casilla, recuperar datos anteriores
+;   (carpeta de la versión 1, base de datos .db o copia .zip).
 ; * Con /ACTUALIZACION=1 (lo usa el actualizador del programa) no pregunta nada ni cambia la configuración.
 ; * Desinstalar NUNCA borra los datos (Documentos\DEV CONTROL y %LOCALAPPDATA%\DEV CONTROL).
 
@@ -71,7 +72,10 @@ Filename: "{cmd}"; Parameters: "/C reg delete ""HKCU\Software\Microsoft\Windows\
 var
   RolePage: TInputOptionWizardPage;
   ServerPage: TInputQueryWizardPage;
-  ImportPage: TInputDirWizardPage;
+  ImportPage: TWizardPage;
+  ImportCheck: TNewCheckBox;
+  ImportHint: TNewStaticText;
+  ImportEdit: TNewEdit;
   TestButton: TNewButton;
   TestLabel: TNewStaticText;
 
@@ -130,9 +134,69 @@ begin
     TestLabel.Caption := Msg;
 end;
 
+procedure UpdateImportCheck;
+begin
+  // Recuperar datos antiguos solo tiene sentido en el anfitrión (es quien guarda los datos).
+  ImportCheck.Enabled := RolePage.SelectedValueIndex = 0;
+  if not ImportCheck.Enabled then
+    ImportCheck.Checked := False;
+  ImportHint.Enabled := ImportCheck.Enabled;
+end;
+
+procedure RoleClick(Sender: TObject);
+begin
+  UpdateImportCheck;
+end;
+
+function HasDatabase(Dir: String): Boolean;
+var
+  F: TFindRec;
+begin
+  Result := FindFirst(Dir + '*.db', F);
+  if Result then
+    FindClose(F);
+end;
+
+// Carpeta de la versión anterior (con datos\*.db o *.db), una base de datos .db o una copia .zip de DEV CONTROL.
+function ImportPathValid(Path: String): Boolean;
+var
+  Ext: String;
+begin
+  Path := Trim(Path);
+  Ext := Lowercase(ExtractFileExt(Path));
+  if Path = '' then
+    Result := False
+  else if DirExists(Path) then
+    Result := HasDatabase(AddBackslash(Path) + 'datos\') or HasDatabase(AddBackslash(Path))
+  else
+    Result := FileExists(Path) and ((Ext = '.zip') or (Ext = '.db'));
+end;
+
+procedure BrowseFolderClick(Sender: TObject);
+var
+  Dir: String;
+begin
+  Dir := Trim(ImportEdit.Text);
+  if BrowseForFolder('Elige la carpeta del programa anterior (la que contiene la carpeta «datos»):', Dir, False) then
+    ImportEdit.Text := Dir;
+end;
+
+procedure BrowseFileClick(Sender: TObject);
+var
+  FileName: String;
+begin
+  FileName := '';
+  if GetOpenFileName('Elige una copia de seguridad o una base de datos', FileName,
+                     ExpandConstant('{userdocs}\DEV CONTROL\Copias de seguridad'),
+                     'Copias y bases de datos (*.zip;*.db)|*.zip;*.db|Todos los archivos (*.*)|*.*', 'zip') then
+    ImportEdit.Text := FileName;
+end;
+
 procedure InitializeWizard;
 var
   Previous: String;
+  Info: TNewStaticText;
+  FolderButton, FileButton: TNewButton;
 begin
   RolePage := CreateInputOptionPage(wpSelectTasks,
     '¿Qué papel tiene este equipo?',
@@ -143,6 +207,27 @@ begin
   RolePage.Add('Miembro: este equipo se conecta al anfitrión');
   Previous := GetIniString('instalacion', 'rol', 'miembro', InstallIni);
   if Previous = 'anfitrion' then RolePage.SelectedValueIndex := 0 else RolePage.SelectedValueIndex := 1;
+  RolePage.CheckListBox.Height := ScaleY(76);
+  RolePage.CheckListBox.OnClickCheck := @RoleClick;
+
+  ImportCheck := TNewCheckBox.Create(RolePage);
+  ImportCheck.Parent := RolePage.Surface;
+  ImportCheck.Top := RolePage.CheckListBox.Top + RolePage.CheckListBox.Height + ScaleY(14);
+  ImportCheck.Width := RolePage.SurfaceWidth;
+  ImportCheck.Height := ScaleY(18);
+  ImportCheck.Caption := 'Tengo datos de la versión anterior y quiero recuperarlos';
+  ImportCheck.Checked := False;
+  ImportHint := TNewStaticText.Create(RolePage);
+  ImportHint.Parent := RolePage.Surface;
+  ImportHint.Top := ImportCheck.Top + ImportCheck.Height + ScaleY(4);
+  ImportHint.Left := ScaleX(18);
+  ImportHint.Width := RolePage.SurfaceWidth - ScaleX(18);
+  ImportHint.AutoSize := False;
+  ImportHint.WordWrap := True;
+  ImportHint.Height := ScaleY(32);
+  ImportHint.Caption := 'Márcala solo si usabas la versión anterior del programa o tienes una copia de seguridad que ' +
+    'quieras recuperar en este equipo. Si no, déjala sin marcar.';
+  UpdateImportCheck;
 
   ServerPage := CreateInputQueryPage(RolePage.ID,
     'Servidor del equipo',
@@ -167,23 +252,39 @@ begin
   TestLabel.WordWrap := True;
   TestLabel.Caption := '';
 
-  ImportPage := CreateInputDirPage(RolePage.ID,
-    'Datos de la versión 1 (opcional)',
-    '¿Usabas la versión 1 del programa en este equipo?',
-    'Si es así, elige la carpeta donde estaba (la que contenía la carpeta «datos»). Sus incidencias, tareas, mensajes y ' +
-    'adjuntos se importarán la primera vez que se abra DEV CONTROL. Si no, deja el campo vacío.',
-    False, '');
-  ImportPage.Add('Carpeta de la versión 1:');
-  ImportPage.Values[0] := '';
-end;
-
-function HasDatabase(Dir: String): Boolean;
-var
-  F: TFindRec;
-begin
-  Result := FindFirst(Dir + '*.db', F);
-  if Result then
-    FindClose(F);
+  // Página propia (no una página de carpeta de Inno Setup, que no admite dejarla vacía).
+  ImportPage := CreateCustomPage(RolePage.ID, 'Recuperar datos anteriores',
+    'Elige dónde están los datos que quieres recuperar.');
+  Info := TNewStaticText.Create(ImportPage);
+  Info.Parent := ImportPage.Surface;
+  Info.Width := ImportPage.SurfaceWidth;
+  Info.AutoSize := False;
+  Info.WordWrap := True;
+  Info.Height := ScaleY(66);
+  Info.Caption := 'Puedes elegir la CARPETA del programa anterior (la que contenía la carpeta «datos») o un ARCHIVO de ' +
+    'copia de seguridad (.zip) o de base de datos (.db). Los datos se recuperarán la primera vez que se abra DEV CONTROL, ' +
+    'solo si en este equipo todavía no hay datos. El original no se modifica.' + #13#10 +
+    'Si al final no quieres recuperar nada, pulsa «Atrás» y desmarca la casilla.';
+  ImportEdit := TNewEdit.Create(ImportPage);
+  ImportEdit.Parent := ImportPage.Surface;
+  ImportEdit.Top := Info.Top + Info.Height + ScaleY(10);
+  ImportEdit.Width := ImportPage.SurfaceWidth;
+  ImportEdit.Text := '';
+  FolderButton := TNewButton.Create(ImportPage);
+  FolderButton.Parent := ImportPage.Surface;
+  FolderButton.Top := ImportEdit.Top + ImportEdit.Height + ScaleY(10);
+  FolderButton.Width := ScaleX(170);
+  FolderButton.Height := ScaleY(26);
+  FolderButton.Caption := 'Elegir carpeta…';
+  FolderButton.OnClick := @BrowseFolderClick;
+  FileButton := TNewButton.Create(ImportPage);
+  FileButton.Parent := ImportPage.Surface;
+  FileButton.Top := FolderButton.Top;
+  FileButton.Left := FolderButton.Left + FolderButton.Width + ScaleX(10);
+  FileButton.Width := ScaleX(210);
+  FileButton.Height := ScaleY(26);
+  FileButton.Caption := 'Elegir copia (.zip o .db)…';
+  FileButton.OnClick := @BrowseFileClick;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -194,7 +295,7 @@ begin
   else if PageID = ServerPage.ID then
     Result := RolePage.SelectedValueIndex = 0
   else if PageID = ImportPage.ID then
-    Result := RolePage.SelectedValueIndex <> 0;
+    Result := (RolePage.SelectedValueIndex <> 0) or not ImportCheck.Checked;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -208,11 +309,16 @@ begin
       Result := MsgBox(Msg + #13#10#13#10 + '¿Quieres continuar de todas formas? Podrás cambiar el servidor al iniciar sesión.',
                        mbConfirmation, MB_YESNO) = IDYES;
   end;
-  if (CurPageID = ImportPage.ID) and (Trim(ImportPage.Values[0]) <> '') then begin
-    if not HasDatabase(AddBackslash(ImportPage.Values[0]) + 'datos\') and not HasDatabase(AddBackslash(ImportPage.Values[0])) then begin
-      MsgBox('En esa carpeta no está la base de datos de la versión 1 (un archivo .db dentro de la carpeta «datos»).', mbError, MB_OK);
-      Result := False;
-    end;
+  if (CurPageID = ImportPage.ID) and not ImportPathValid(ImportEdit.Text) then begin
+    if Trim(ImportEdit.Text) = '' then
+      MsgBox('Elige la carpeta o la copia que quieres recuperar.' + #13#10#13#10 +
+             'Si no quieres recuperar nada, pulsa «Atrás» y desmarca la casilla «Tengo datos de la versión anterior».',
+             mbInformation, MB_OK)
+    else
+      MsgBox('Ahí no se encuentran datos de DEV CONTROL.' + #13#10#13#10 +
+             'Elige la carpeta del programa anterior (la que contiene la carpeta «datos» con un archivo .db) o una copia ' +
+             '.zip de la carpeta Documentos\DEV CONTROL\Copias de seguridad.', mbError, MB_OK);
+    Result := False;
   end;
 end;
 
@@ -226,11 +332,15 @@ begin
     if RolePage.SelectedValueIndex = 0 then begin
       SetIniString('instalacion', 'rol', 'anfitrion', Ini);
       SetIniString('instalacion', 'servidor', '', Ini);
-      SetIniString('instalacion', 'importar_desde', Trim(ImportPage.Values[0]), Ini);
     end else begin
       SetIniString('instalacion', 'rol', 'miembro', Ini);
       SetIniString('instalacion', 'servidor', Trim(ServerPage.Values[0]), Ini);
     end;
+    // Sin la casilla marcada se borra cualquier ruta de una instalación anterior.
+    if (RolePage.SelectedValueIndex = 0) and ImportCheck.Checked then
+      SetIniString('instalacion', 'importar_desde', Trim(ImportEdit.Text), Ini)
+    else
+      SetIniString('instalacion', 'importar_desde', '', Ini);
     if WizardIsTaskSelected('autostart') then
       SetIniString('instalacion', 'iniciar_con_windows', 'si', Ini)
     else

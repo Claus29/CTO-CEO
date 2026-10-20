@@ -2,6 +2,15 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.0.1] - 2026-10-20
+
+- Instalador: recuperar datos anteriores ya es de verdad opcional. En la pantalla «¿Qué papel tiene este equipo?»
+  hay una casilla «Tengo datos de la versión anterior y quiero recuperarlos»; sin marcarla no se pide nada.
+  Antes el campo «opcional» no dejaba avanzar si se dejaba vacío.
+- Se puede recuperar desde la carpeta del programa anterior, una base de datos `.db` o una copia `.zip`.
+- Al abrir el programa se avisa de lo que se ha recuperado. Si la copia elegida no es válida, se abre la pantalla
+  de recuperación en lugar de empezar sin datos. Nunca se importa encima de datos que ya existen.
+
 ## [2.0.0] - 2026-10-20
 
 Primera versión pública de DEV CONTROL.
