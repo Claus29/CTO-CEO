@@ -1,0 +1,23 @@
+[project]
+name = "devcontrol"
+dynamic = ["version"]
+description = "Coordinación privada de equipos de desarrollo: incidencias, tareas, planificación y chat, en tu red."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = ["E501", "B008", "UP038", "B904", "UP017"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["devcontrol"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

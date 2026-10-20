@@ -1,0 +1,47 @@
+name: Publicar versión
+
+# Se ejecuta al subir una etiqueta v<versión> (por ejemplo v2.0.1) que coincida con APP_VERSION.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencias
+        run: python -m pip install -r requirements-windows.txt pytest==8.3.5
+      - name: Comprobar versión
+        shell: bash
+        run: |
+          V=$(python -c "import devcontrol; print(devcontrol.APP_VERSION)")
+          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then echo "La etiqueta ${GITHUB_REF_NAME} no coincide con APP_VERSION=$V"; exit 1; fi
+          echo "VERSION=$V" >> $GITHUB_ENV
+      - name: Pruebas
+        run: python -m pytest
+      - name: Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Compilar
+        run: python tools/build_windows.py
+      - name: Firmar el manifiesto de actualización
+        env:
+          DEVCONTROL_SIGNING_KEY: ${{ secrets.DEVCONTROL_SIGNING_KEY }}
+        shell: bash
+        run: |
+          python tools/release_notes.py > dist/NOTAS.md
+          python tools/make_manifest.py "dist/DEVCONTROL-Setup-${VERSION}.exe" --repo "${GITHUB_REPOSITORY}" --notes dist/NOTAS.md
+      - name: Crear la publicación en GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "DEV CONTROL ${VERSION}" --notes-file dist/NOTAS.md \
+            "dist/DEVCONTROL-Setup-${VERSION}.exe" dist/manifest.json dist/manifest.json.sig

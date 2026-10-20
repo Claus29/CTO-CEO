@@ -1,0 +1,97 @@
+name: Comprobaciones
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    name: Pruebas (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dependencias
+        run: python -m pip install -r requirements-dev.txt
+      - name: Estilo (ruff)
+        run: python -m ruff check .
+      - name: Sintaxis de la interfaz
+        shell: bash
+        run: for f in $(find devcontrol/web/js -name '*.js'); do node --check "$f" || exit 1; done
+      - name: Pruebas
+        run: python -m pytest
+
+  interfaz:
+    name: Recorrido de la interfaz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dependencias
+        run: |
+          python -m pip install -r requirements.txt
+          npm install --no-save playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Recorrer todas las pantallas
+        run: |
+          export DEVCONTROL_HOME="$RUNNER_TEMP/dchome"
+          mkdir -p "$DEVCONTROL_HOME/Local"
+          printf "[instalacion]\nrol = anfitrion\niniciar_con_windows = no\n" > "$DEVCONTROL_HOME/Local/instalacion.ini"
+          python -m devcontrol --sin-ventana &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8770/local/status >/dev/null && break; sleep 1; done
+          node tools/e2e_tour.mjs http://127.0.0.1:8770/ capturas
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capturas-interfaz
+          path: capturas
+          retention-days: 7
+
+  compilar:
+    name: Compilar instalador de Windows
+    needs: pruebas
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencias
+        run: python -m pip install -r requirements-windows.txt
+      - name: Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Compilar
+        run: python tools/build_windows.py
+      - name: Prueba de humo del ejecutable
+        shell: pwsh
+        run: |
+          $env:DEVCONTROL_HOME = "$env:RUNNER_TEMP\dchome"
+          $p = Start-Process -FilePath "dist\DEV CONTROL\DEV CONTROL.exe" -ArgumentList "--sin-ventana" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Seconds 1
+            try { $r = Invoke-RestMethod -Uri "http://127.0.0.1:8770/local/status" -TimeoutSec 2; if ($r.app -eq "DEV CONTROL") { $ok = $true; break } } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { Get-ChildItem -Recurse "$env:DEVCONTROL_HOME" | Out-String | Write-Host; throw "El ejecutable no ha arrancado" }
+          Write-Host "El ejecutable arranca y responde."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: dist/DEVCONTROL-Setup-*.exe
+          retention-days: 14

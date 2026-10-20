@@ -1,0 +1,5 @@
+# Programa de escritorio y empaquetado (solo Windows).
+-r requirements.txt
+pywebview==5.4
+pystray==0.19.5
+pyinstaller==6.12.0

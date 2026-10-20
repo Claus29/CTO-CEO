@@ -1,0 +1,36 @@
+name: Informar de un error
+description: Algo no funciona como debería
+labels: ["error"]
+body:
+  - type: textarea
+    id: que
+    attributes:
+      label: Qué ha pasado
+      description: Describe el problema y qué esperabas que pasara.
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      placeholder: "1. Abrir…\n2. Pulsar…"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versión de DEV CONTROL
+      placeholder: "2.0.0 (Ajustes → Servidor y actualizaciones)"
+    validations:
+      required: true
+  - type: dropdown
+    id: rol
+    attributes:
+      label: Este equipo es
+      options: ["Anfitrión", "Miembro"]
+  - type: textarea
+    id: registro
+    attributes:
+      label: Registros (opcional)
+      description: Fragmento de %LOCALAPPDATA%\DEV CONTROL\Registros (no contienen contraseñas).
+      render: text

@@ -1,0 +1,161 @@
+/* Estilos de las vistas: collab (chat, equipo, wiki, decisiones, bóveda) */
+
+/* ---------- chat ---------- */
+.chat-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100%; width: 100%; min-height: 0; }
+.chat-layout .chat { min-height: 0; min-width: 0; position: relative; }
+.chan-side { background: var(--bg-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.chan-side-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 8px 16px; }
+.chan-list { overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 1px; }
+.chan-group { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 12px 8px 4px; }
+.chan { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--text-2); font: inherit;
+  text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer; width: 100%; }
+.chan:hover { background: var(--panel); color: var(--text); }
+.chan.on { background: var(--panel-3); color: var(--text); font-weight: 600; }
+.chan.unread { color: var(--text); font-weight: 700; }
+.chan .hash { width: 9px; text-align: center; color: var(--muted); font-weight: 700; }
+.chan-select { display: none; width: auto; max-width: 180px; }
+.chat-head h2 { font-size: 16px; }
+.chat-search { position: relative; width: 240px; flex: none; }
+.chat-search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.chat-search input { padding-left: 30px; height: 32px; }
+.chat-scroll-wrap { position: relative; min-height: 0; display: flex; flex-direction: column; }
+.chat-scroll-wrap .chat-scroll { flex: 1; min-height: 0; }
+.new-pill { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); border: 1px solid var(--accent); background: var(--accent);
+  color: var(--accent-ink); font: inherit; font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 5px 14px; cursor: pointer;
+  box-shadow: var(--shadow); display: inline-flex; gap: 6px; align-items: center; z-index: 2; }
+.new-pill + .new-pill { bottom: 52px; }
+.chat .older { text-align: center; padding: 4px 0 8px; }
+.chan-start { text-align: center; padding: 16px 0 6px; color: var(--text-2); }
+.unread-sep { display: flex; align-items: center; gap: 10px; color: var(--danger); font-size: 11.5px; font-weight: 700; margin: 8px 0;
+  text-transform: uppercase; letter-spacing: .06em; }
+.unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: var(--danger); opacity: .5; }
+.msg.cont { padding-top: 0; margin-top: -2px; }
+.msg.cont > .avatar { visibility: hidden; height: 0; }
+.msg.cont .who { display: none; }
+.msg-work { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.msg-work .inc-card, .msg .inc-card { text-decoration: none; color: var(--text); }
+.msg.pending-msg .bubble { opacity: .78; border-style: dashed; }
+.msg .tools svg { width: 14px; height: 14px; display: block; }
+.linklike { border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 2px; }
+.linklike:hover { text-decoration: underline; color: var(--text); }
+.msg .foot .read svg, .msg .foot svg { width: 12px; height: 12px; }
+.att-file { cursor: pointer; border: 1px solid var(--border); color: var(--text); font: inherit; font-size: 12.5px; }
+.att-file:hover { border-color: var(--accent); }
+.att-file svg { width: 14px; height: 14px; flex: none; }
+.search-hit { display: flex; gap: 10px; align-items: flex-start; width: 100%; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  font: inherit; text-align: left; border-radius: 9px; padding: 9px 12px; cursor: pointer; margin-top: 6px; }
+.search-hit:hover { border-color: var(--accent); }
+.ellipsis2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.chat .composer { position: relative; }
+.composer-files { margin-bottom: 8px; gap: 6px; }
+.composer .box .btn { flex: none; }
+.mention-pop { position: absolute; left: 22px; bottom: calc(100% - 8px); width: min(340px, calc(100% - 44px)); background: var(--panel);
+  border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; z-index: 5; }
+.mention-title { padding: 4px 8px; }
+.mention-item { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: transparent; color: var(--text); font: inherit;
+  text-align: left; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+.mention-item.on, .mention-item:hover { background: var(--panel-3); }
+.mention-item .avatar { width: 24px; height: 24px; font-size: 10.5px; }
+.chat.drop-over::after { content: "Suelta los archivos para adjuntarlos al mensaje"; position: absolute; inset: 8px; border: 2px dashed var(--accent);
+  border-radius: 12px; background: var(--accent-soft); display: grid; place-items: center; color: var(--text); font-weight: 600; pointer-events: none; z-index: 6; }
+
+/* ---------- equipo ---------- */
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.person-card .section-title { margin-top: 14px; }
+.person-card.hl, .load-row.hl { box-shadow: 0 0 0 2px var(--accent); }
+.work-line { gap: 8px; padding: 4px 6px; border-radius: 6px; color: var(--text); text-decoration: none !important; min-width: 0; }
+.work-line:hover { background: var(--panel-2); }
+.col.tight { gap: 2px; }
+.load-row { border-top: 1px solid var(--border); }
+.load-row:first-child { border-top: 0; }
+.load-row.over { background: linear-gradient(90deg, var(--danger-bg), transparent 55%); }
+.load-main { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: transparent; color: var(--text); font: inherit;
+  text-align: left; padding: 12px 14px; cursor: pointer; flex-wrap: wrap; }
+.load-main:hover { background: var(--panel-2); }
+.load-name { width: 180px; min-width: 0; }
+.load-bar { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
+.load-bar .progress { height: 8px; }
+.progress.over > i { background: var(--danger); }
+.load-nums { display: flex; flex-direction: column; align-items: flex-end; min-width: 120px; font-size: 13px; font-weight: 600; }
+.load-items { padding: 4px 14px 12px 56px; display: flex; flex-direction: column; gap: 2px; }
+.load-items .row > .work-line { flex: 1; }
+.standup.has-block { border-color: rgba(239, 83, 80, .5); }
+.standup .section-title { margin-top: 10px; }
+.daily-form textarea { min-height: 110px; }
+.timer-card { border-color: var(--ok); }
+.big-clock { font-size: 22px; color: var(--ok); }
+
+/* ---------- wiki ---------- */
+.wiki-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 20px; align-items: start; }
+.wiki-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 110px); }
+.wiki-search { position: relative; }
+.wiki-search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.wiki-search input { padding-left: 30px; }
+.wiki-tree { overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; min-height: 120px; }
+.wiki-tree .pad { padding: 8px 10px; }
+.wiki-folder { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: transparent; color: var(--text-2); font: inherit;
+  font-size: 12.5px; font-weight: 700; text-align: left; padding: 6px 8px; border-radius: 6px; cursor: pointer; margin-top: 2px; }
+.wiki-folder:hover { background: var(--panel-2); }
+.wiki-folder svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.wiki-link { display: flex; align-items: center; gap: 7px; padding: 5px 8px 5px 22px; border-radius: 6px; color: var(--text-2); text-decoration: none !important; font-size: 13px; }
+.wiki-link:hover { background: var(--panel-2); color: var(--text); }
+.wiki-link.on { background: var(--panel-3); color: var(--text); font-weight: 600; }
+.wiki-link svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.wiki-hit { display: block; padding: 6px 10px; border-radius: 6px; color: var(--text); text-decoration: none !important; }
+.wiki-hit:hover { background: var(--panel-2); }
+mark { background: var(--warn-bg); color: var(--text); border-radius: 3px; padding: 0 2px; }
+.wiki-main { min-width: 0; }
+.wiki-crumbs { margin-bottom: 6px; }
+.wiki-body { line-height: 1.65; overflow-wrap: anywhere; }
+.list-item.current { cursor: default; background: var(--accent-soft); }
+.wiki-editor { min-height: 420px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; line-height: 1.55; }
+.md > :first-child { margin-top: 0; }
+.md p { margin: 0 0 10px; }
+.md h2 { font-size: 20px; margin: 22px 0 10px; }
+.md h3 { font-size: 17px; margin: 18px 0 8px; }
+.md h4, .md h5 { font-size: 15px; margin: 14px 0 6px; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 24px; }
+.md li { margin: 2px 0; }
+.md li.md-check { list-style: none; margin-left: -20px; }
+.md blockquote { margin: 0 0 10px; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--bg-2); border-radius: 0 6px 6px 0; color: var(--text-2); }
+.md code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .9em; background: var(--panel-3); border-radius: 4px; padding: 1px 5px; }
+.md pre.md-code { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0 0 10px; }
+.md pre.md-code code { background: transparent; padding: 0; white-space: pre; }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+
+/* ---------- decisiones ---------- */
+.kv dt, .kv dd { overflow-wrap: anywhere; }
+
+/* ---------- bóveda ---------- */
+.vault-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+.vault-item.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.vault-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+.vault-kv { margin-top: 12px; grid-template-columns: 90px 1fr; align-items: center; }
+.vault-kv dd .btn { flex: none; }
+.vault-secret { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.vault-secret .secret { text-align: left; user-select: all; word-break: break-all; font-size: 15px; }
+.vault-setup { max-width: 760px; }
+.vault-unlock { max-width: 760px; }
+.vault-unlock .row input { max-width: 380px; }
+
+/* ---------- ventanas estrechas ---------- */
+@media (max-width: 1100px) {
+  .chat-search { width: 180px; }
+  .wiki-layout { grid-template-columns: 220px minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .chat-layout { grid-template-columns: minmax(0, 1fr); }
+  .chan-side { display: none; }
+  .chan-select { display: block; }
+  .wiki-layout { grid-template-columns: minmax(0, 1fr); }
+  .wiki-side { position: static; max-height: none; }
+  .wiki-tree { max-height: 260px; }
+  .vault-grid { grid-template-columns: minmax(0, 1fr); }
+  .load-name { width: 140px; }
+}
+@media (max-width: 760px) {
+  .chat-head { flex-wrap: wrap; padding: 10px 14px; }
+  .chat-search { width: 100%; order: 5; }
+  .chat-scroll, .composer { padding-left: 14px; padding-right: 14px; }
+  .people-grid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,17 @@
+name: Proponer una mejora
+description: Una idea para DEV CONTROL
+labels: ["propuesta"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qué problema resuelve
+      description: Empieza por el problema del equipo, no por la solución.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+    validations:
+      required: true

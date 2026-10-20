@@ -1,0 +1,3 @@
+# Dependencias para ejecutar DEV CONTROL desde el código fuente (servidor y programa local).
+cryptography==44.0.2
+pillow==11.1.0

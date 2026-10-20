@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+packaging/version_info.txt
+*.log
+*.db-wal
+*.db-shm
+.DS_Store
+Thumbs.db
+# Nunca se sube la clave privada de firma de actualizaciones
+*SIGNING_KEY*
+*.pem
+node_modules/
+capturas/
