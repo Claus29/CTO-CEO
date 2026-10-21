@@ -30,6 +30,9 @@ def main() -> int:
     key = os.environ.get("DEVCONTROL_SIGNING_KEY", "").strip()
     if not key:
         sys.exit("Falta el secreto DEVCONTROL_SIGNING_KEY: sin él las actualizaciones no se pueden firmar.")
+    if key.startswith(("github_pat_", "ghp_")) or len(key) != 44 or not key.endswith("="):
+        sys.exit("El secreto DEVCONTROL_SIGNING_KEY no contiene la clave de firma (un texto de 44 caracteres que "
+                 "termina en «=»). La clave de acceso github_pat_… no va ahí: va en Ajustes del anfitrión.")
     inst = Path(args.installer)
     data = inst.read_bytes()
     notes = Path(args.notes).read_text(encoding="utf-8") if args.notes and Path(args.notes).exists() else args.notes
