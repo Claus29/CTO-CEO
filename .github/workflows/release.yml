@@ -1,9 +1,11 @@
 name: Publicar versión
 
-# Se ejecuta al subir una etiqueta v<versión> (por ejemplo v2.0.1) que coincida con APP_VERSION.
+# Se ejecuta al subir una etiqueta v<versión> (por ejemplo v2.0.1) que coincida con APP_VERSION,
+# o a mano desde Actions → «Publicar versión» → Run workflow (crea la etiqueta con la versión de APP_VERSION).
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,8 +24,11 @@ jobs:
         shell: bash
         run: |
           V=$(python -c "import devcontrol; print(devcontrol.APP_VERSION)")
-          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then echo "La etiqueta ${GITHUB_REF_NAME} no coincide con APP_VERSION=$V"; exit 1; fi
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "v$V" != "${GITHUB_REF_NAME}" ]; then
+            echo "La etiqueta ${GITHUB_REF_NAME} no coincide con APP_VERSION=$V"; exit 1
+          fi
           echo "VERSION=$V" >> $GITHUB_ENV
+          echo "TAG=v$V" >> $GITHUB_ENV
       - name: Pruebas
         run: python -m pytest
       - name: Inno Setup
@@ -36,6 +41,10 @@ jobs:
           DEVCONTROL_SIGNING_KEY: ${{ secrets.DEVCONTROL_SIGNING_KEY }}
         shell: bash
         run: |
+          if [ -z "$DEVCONTROL_SIGNING_KEY" ]; then
+            echo "::error::Falta el secreto DEVCONTROL_SIGNING_KEY (Settings → Secrets and variables → Actions). Sin él los programas instalados no aceptarán la actualización."
+            exit 1
+          fi
           python tools/release_notes.py > dist/NOTAS.md
           python tools/make_manifest.py "dist/DEVCONTROL-Setup-${VERSION}.exe" --repo "${GITHUB_REPOSITORY}" --notes dist/NOTAS.md
       - name: Crear la publicación en GitHub
@@ -43,5 +52,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" --title "DEV CONTROL ${VERSION}" --notes-file dist/NOTAS.md \
+          if gh release view "${TAG}" >/dev/null 2>&1; then echo "La versión ${TAG} ya está publicada."; exit 1; fi
+          gh release create "${TAG}" --target "${GITHUB_SHA}" --title "DEV CONTROL ${VERSION}" --notes-file dist/NOTAS.md \
             "dist/DEVCONTROL-Setup-${VERSION}.exe" dist/manifest.json dist/manifest.json.sig
