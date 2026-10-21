@@ -39,6 +39,7 @@ jobs:
       - name: Firmar el manifiesto de actualización
         env:
           DEVCONTROL_SIGNING_KEY: ${{ secrets.DEVCONTROL_SIGNING_KEY }}
+          PYTHONUTF8: "1"
         shell: bash
         run: |
           if [ -z "$DEVCONTROL_SIGNING_KEY" ]; then

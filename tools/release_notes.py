@@ -9,4 +9,6 @@ from devcontrol import APP_VERSION  # noqa: E402
 
 text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 m = re.search(rf"^## \[?{re.escape(APP_VERSION)}\]?.*?$(.*?)(?=^## |\Z)", text, re.S | re.M)
+# En Windows la consola usa cp1252 y las notas llevan caracteres como «→».
+sys.stdout.reconfigure(encoding="utf-8")
 print(m.group(1).strip() if m else f"DEV CONTROL {APP_VERSION}")
