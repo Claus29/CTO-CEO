@@ -126,8 +126,8 @@ class App:
 
     # -- una sola instancia ------------------------------------------------------------
     def other_instance(self) -> bool:
-        """Si DEV CONTROL ya está abierto en este equipo, le pide que se muestre."""
-        port = self.cfg.local_port
+        """Si DEV CONTROL ya está abierto en este equipo (en el mismo puerto), le pide que se muestre."""
+        port = self.agent.local_port
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
             conn.request("GET", "/local/status", headers={"Host": f"127.0.0.1:{port}"})
@@ -152,6 +152,9 @@ class App:
     # -- ejecución ----------------------------------------------------------------------
     def run(self, start_hidden: bool = False) -> int:
         if self.other_instance():
+            self.log.info("DEV CONTROL ya estaba abierto en el puerto %s: se muestra esa ventana", self.agent.local_port)
+            if self.headless:
+                print(f"{APP_NAME} ya está abierto en http://127.0.0.1:{self.agent.local_port}/", flush=True)
             return 0
         if self.cfg.is_host:
             self.start_server()

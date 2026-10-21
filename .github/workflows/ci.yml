@@ -51,16 +51,20 @@ jobs:
           export DEVCONTROL_HOME="$RUNNER_TEMP/dchome"
           mkdir -p "$DEVCONTROL_HOME/Local"
           printf "[instalacion]\nrol = anfitrion\niniciar_con_windows = no\n" > "$DEVCONTROL_HOME/Local/instalacion.ini"
-          python -m devcontrol --sin-ventana &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8770/local/status >/dev/null && break; sleep 1; done
+          python -m devcontrol --sin-ventana > "$RUNNER_TEMP/recorrido.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/recorrido.pid"
+          ok=0; for i in $(seq 1 30); do curl -sf http://127.0.0.1:8770/local/status >/dev/null && { ok=1; break; }; sleep 1; done
+          [ $ok = 1 ] || { echo "El programa no arrancó:"; cat "$RUNNER_TEMP/recorrido.log"; exit 1; }
           node tools/e2e_tour.mjs http://127.0.0.1:8770/ capturas
+          kill "$(cat "$RUNNER_TEMP/recorrido.pid")"
       - name: Llamadas reales entre varios usuarios (directas y por el repetidor)
         run: |
           export DEVCONTROL_HOME="$RUNNER_TEMP/dchome2"
           mkdir -p "$DEVCONTROL_HOME/Local"
-          printf "[instalacion]\nrol = anfitrion\npuerto = 8785\niniciar_con_windows = no\n" > "$DEVCONTROL_HOME/Local/instalacion.ini"
-          python -m devcontrol --sin-ventana --puerto-local 8795 &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8795/local/status >/dev/null && break; sleep 1; done
+          printf "[instalacion]\nrol = anfitrion\npuerto = 8785\npuerto_llamadas = 8786\niniciar_con_windows = no\n" > "$DEVCONTROL_HOME/Local/instalacion.ini"
+          python -m devcontrol --sin-ventana --puerto-local 8795 > "$RUNNER_TEMP/llamadas.log" 2>&1 &
+          ok=0; for i in $(seq 1 30); do curl -sf http://127.0.0.1:8795/local/status >/dev/null && { ok=1; break; }; sleep 1; done
+          [ $ok = 1 ] || { echo "El programa no arrancó:"; cat "$RUNNER_TEMP/llamadas.log"; exit 1; }
           node tools/e2e_calls.mjs http://127.0.0.1:8795/ capturas/llamadas
       - uses: actions/upload-artifact@v4
         if: always()

@@ -1,4 +1,5 @@
 """Programa local: proxy, cola sin conexión con reenvío sin duplicados, caché y elección de servidor."""
+import socket
 import time
 import uuid
 
@@ -110,3 +111,17 @@ def test_local_actions_require_json(stack):
     assert code == 415
     assert local.post("/local/attention", {"title": "Llamada", "show": False})["ok"]
     assert local.get("/local/status")["server_host"] == "127.0.0.1"
+
+
+def test_single_instance_check_uses_the_chosen_port(stack, tmp_path):
+    """Dos programas con puertos distintos no se confunden entre sí (antes el segundo se cerraba solo)."""
+    from conftest import make_layout
+
+    from devcontrol.desktop import App
+    other = make_layout(tmp_path / "otro")
+    busy_port = stack["agent"].local_port
+    assert App(other, headless=True, port=busy_port).other_instance()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        free_port = s.getsockname()[1]
+    assert not App(other, headless=True, port=free_port).other_instance()

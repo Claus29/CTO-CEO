@@ -206,7 +206,7 @@ def ensure_config_file(layout: Layout) -> Path:
     values = {
         "rol": install.get("instalacion", "rol", fallback="miembro"),
         "puerto": install.get("instalacion", "puerto", fallback=str(DEFAULT_SERVER_PORT)),
-        "puerto_llamadas": str(DEFAULT_CALL_PORT),
+        "puerto_llamadas": install.get("instalacion", "puerto_llamadas", fallback=str(DEFAULT_CALL_PORT)),
         "servidor": install.get("instalacion", "servidor", fallback=""),
         "autostart": "si" if _yes(install.get("instalacion", "iniciar_con_windows", fallback="si")) else "no",
         "puerto_local": str(DEFAULT_LOCAL_PORT),
