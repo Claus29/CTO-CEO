@@ -35,7 +35,9 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME || un
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 
 async function person(user, relay = false) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 }, permissions: ['microphone', 'camera'] });
+  // bypassCSP: algunas versiones de Playwright evalúan las esperas como texto, algo que la política de seguridad
+  // de la interfaz (script-src 'self') bloquea a propósito. Solo afecta a esta prueba, no al programa.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 }, permissions: ['microphone', 'camera'], bypassCSP: true });
   const page = await ctx.newPage();
   page.on('pageerror', e => errors.push(`${user} pageerror: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/status of 4\d\d/.test(m.text())) errors.push(`${user} console: ${m.text()}`); });
