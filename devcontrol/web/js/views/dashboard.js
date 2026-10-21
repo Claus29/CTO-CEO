@@ -1,5 +1,6 @@
 // Panel: lo que necesita tu atención ahora (por verificar, asignado a ti, bloqueos, vencidos).
 import { api } from '../api.js';
+import { callButtons } from '../calls.js';
 import { can, store, userById, withProject } from '../state.js';
 import { avatar, emptyState, errorBox, fmtDate, fmtRelative, h, icon, mount, pageHead, priorityBadge, statusBadge, typeBadge } from '../ui.js';
 
@@ -70,7 +71,7 @@ export default async function render(ctx) {
           people.length ? h('div', null, people.map(u => h('div', { class: 'list-item' }, avatar(u, u.online),
             h('div', { class: 'grow' }, h('div', null, u.display_name), h('div', { class: 'tiny muted ellipsis' },
               u.online ? (u.last_action || 'En línea') : `Visto ${fmtRelative(u.last_seen_at)}`)),
-            h('span', { class: 'tiny muted' }, u.role_label || ''))))
+            h('span', { class: 'tiny muted' }, u.role_label || ''), callButtons({ userId: u.id }))))
             : emptyState('Aún estás solo', can('sistema.usuarios') ? 'Invita a tu equipo desde «Usuarios y roles».' : '')),
         d.resolved_recent.length ? listCard('Resueltas recientemente', d.resolved_recent) : null));
     void userById;

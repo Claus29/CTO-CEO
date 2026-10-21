@@ -586,6 +586,30 @@ CREATE TABLE IF NOT EXISTS onboarding_progress (
 );
 
 -- Registro, avisos y sincronización ------------------------------------------------------------
+-- Llamadas ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL DEFAULT 'voz',
+    channel_id INTEGER REFERENCES channels(id),
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    answered_at TEXT,
+    ended_at TEXT,
+    status TEXT NOT NULL DEFAULT 'llamando',
+    end_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS call_participants (
+    call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    state TEXT NOT NULL,
+    invited_by INTEGER,
+    joined_at TEXT,
+    left_at TEXT,
+    PRIMARY KEY (call_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS ix_call_participants_user ON call_participants(user_id);
+
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id),

@@ -206,3 +206,21 @@ def test_empty_import_path_is_ignored(layout):
     with open(layout.install_file, "a", encoding="utf-8") as fh:
         fh.write("importar_desde =\n")
     assert App(layout, headless=True)._import_path() is None
+
+
+def test_upgrade_from_2_0_adds_calls_and_permission(tmp_path):
+    """Una base de datos de la 2.0 (sin llamadas) se completa al abrirla con la 2.1, sin perder nada."""
+    from devcontrol.server.db import Database
+    db = Database(tmp_path / "d.db")
+    with db.tx() as c:
+        c.execute("DROP TABLE call_participants")
+        c.execute("DROP TABLE calls")
+        c.execute("DELETE FROM role_permissions WHERE perm='llamadas.usar'")
+        c.execute("DELETE FROM meta WHERE key='permisos_anadidos'")
+    db.close()
+    db = Database(tmp_path / "d.db")
+    assert db.scalar("SELECT COUNT(*) FROM calls") == 0
+    granted = {r["key"] for r in db.query("SELECT r.key FROM roles r JOIN role_permissions p ON p.role_id=r.id "
+                                          "WHERE p.perm='llamadas.usar'")}
+    assert granted == {"admin", "cto", "dev", "qa"}
+    db.close()

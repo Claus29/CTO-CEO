@@ -71,15 +71,24 @@ def set_autostart(enabled: bool) -> None:
                 pass
 
 
-def allow_in_firewall(port: int) -> bool:
-    """Pide permiso de administrador para abrir el puerto del servidor solo a redes privadas."""
+def allow_in_firewall(port: int, call_port: int | None = None, relay_ports: tuple | None = None) -> bool:
+    """Pide permiso de administrador (una vez) para abrir el servidor y las llamadas solo a redes privadas."""
     if not IS_WINDOWS:
         return False
     import ctypes
-    args = (f'advfirewall firewall add rule name="{APP_NAME} (servidor)" dir=in action=allow protocol=TCP '
-            f'localport={port} profile=private,domain remoteip=localsubnet,100.64.0.0/10,10.0.0.0/8,'
-            f'172.16.0.0/12,192.168.0.0/16')
-    return ctypes.windll.shell32.ShellExecuteW(None, "runas", "netsh", args, None, 0) > 32
+    remote = "localsubnet,100.64.0.0/10,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    rules = [f'name="{APP_NAME} (servidor)" dir=in action=allow protocol=TCP localport={port}']
+    if call_port:
+        rules.append(f'name="{APP_NAME} (llamadas TCP)" dir=in action=allow protocol=TCP localport={call_port}')
+        ports = f"{call_port}" + (f",{relay_ports[0]}-{relay_ports[1]}" if relay_ports else "")
+        rules.append(f'name="{APP_NAME} (llamadas UDP)" dir=in action=allow protocol=UDP localport={ports}')
+    if getattr(sys, "frozen", False):
+        rules.append(f'name="{APP_NAME} (programa)" dir=in action=allow program="{sys.executable}"')
+    # Se borran las reglas anteriores con el mismo nombre para no duplicarlas.
+    cmds = [f'netsh advfirewall firewall delete rule name="{r.split(chr(34))[1]}" >nul 2>&1' for r in rules]
+    cmds += [f"netsh advfirewall firewall add rule {r} profile=private,domain remoteip={remote}" for r in rules]
+    script = " & ".join(cmds)
+    return ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f"/c {script}", None, 0) > 32
 
 
 def computer_name() -> str:

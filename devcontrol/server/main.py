@@ -27,6 +27,7 @@ from . import (
     attachments,
     auth,
     backups,
+    calls,
     chat,
     exports,
     incidents,
@@ -49,8 +50,9 @@ from .web import BaseHandler, HttpError, QuietServer, Response, Router, bad_requ
 
 LONG_POLL_MAX = 30
 DB_NAME = "devcontrol.db"
-MODULES = (relations, incidents, attachments, chat, planning, quality, knowledge, team, reports, integrations,
+MODULES = (relations, incidents, attachments, chat, calls, planning, quality, knowledge, team, reports, integrations,
            notifications, backups, exports)
+FEATURES = ["calls"]
 # Rutas permitidas mientras el usuario debe cambiar la contraseña o activar la verificación en dos pasos.
 GATE_ALLOWED = {"/api/me", "/api/me/password", "/api/logout", "/api/me/2fa/start", "/api/me/2fa/confirm",
                 "/api/changes", "/api/health"}
@@ -94,6 +96,10 @@ class ServerApp:
         self.listen_errors: list[str] = []
         self.stop_event = threading.Event()
         self.local_secret = self._local_secret()
+        self.turn = None
+        self.turn_port: int | None = None
+        self.turn_error = ""
+        self.turn_secret = secrets.token_bytes(32)
         self.cfg.own_addresses = own_ip_addresses()
         self._settings: dict = {}
         self._settings_epoch = None
@@ -366,7 +372,8 @@ class ServerApp:
         if self.db is None:
             out.update(recovery=True, recovery_reason=self.recovery["reason"], setup_required=False, epoch=None)
         else:
-            out.update(recovery=False, epoch=self.db.epoch,
+            out.update(recovery=False, epoch=self.db.epoch, features=FEATURES, call_port=self.turn_port,
+                       call_error=self.turn_error,
                        setup_required=not self.db.scalar("SELECT COUNT(*) FROM users"),
                        imported=self.import_summary)
         return out
@@ -807,7 +814,37 @@ class ServerApp:
         self.log.info("%s %s escuchando en %s (datos: %s)", APP_NAME, APP_VERSION, ", ".join(self.listening),
                       self.data_dir)
         threading.Thread(target=self._scheduler, name="programador", daemon=True).start()
+        self._start_turn(0 if port == 0 else self.cfg.call_port)
         return self.port
+
+    # -- repetidor de llamadas ---------------------------------------------------------------
+    def _start_turn(self, port: int) -> None:
+        from .turn import TurnServer
+
+        def authorize(user_id: int, call_id: int) -> bool:
+            hub = getattr(self, "calls", None)
+            if hub is None:
+                return False
+            with hub.lock:
+                call = hub.calls.get(call_id)
+                p = call["parts"].get(user_id) if call else None
+                return bool(p and p["state"] in ("dentro", "llamando"))
+
+        try:
+            self.turn = TurnServer(port, self.turn_secret, self.cfg.is_allowed_client, authorize,
+                                   port_range=self.cfg.relay_ports, log=self.log)
+            self.turn.start()
+            self.turn_port = self.turn.port
+            self.log.info("Repetidor de llamadas en el puerto %s (UDP y TCP)", self.turn_port)
+        except OSError as exc:
+            self.turn, self.turn_port = None, None
+            self.turn_error = (f"No se puede abrir el puerto {port} para las llamadas ({exc}). Las llamadas funcionarán "
+                               "solo entre equipos que puedan verse directamente.")
+            self.log.error(self.turn_error)
+
+    def turn_drop(self, call_id: int) -> None:
+        if self.turn:
+            self.turn.drop_call(call_id)
 
     def _bind_loop(self, ip: str):
         """Escucha en una IP concreta; si la red (p. ej. Tailscale) aún no está activa, lo reintenta."""
@@ -886,7 +923,14 @@ class ServerApp:
     def shutdown(self, backup: bool = True):
         if self.stop_event.is_set():
             return
+        if getattr(self, "calls", None) is not None:
+            try:
+                self.calls.shutdown()   # avisa a quien esté en una llamada antes de cerrar
+            except Exception:
+                self.log.exception("Error al cerrar las llamadas")
         self.stop_event.set()
+        if self.turn:
+            self.turn.stop()
         for srv in self.servers:
             try:
                 srv.shutdown()

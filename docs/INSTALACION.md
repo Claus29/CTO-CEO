@@ -19,8 +19,8 @@ El anfitrión guarda la base de datos y ejecuta el servidor del equipo. Debe est
    que se abre el programa y solo si en ese equipo aún no hay datos (los identificadores de la versión 1 pasan al
    prefijo `INC-` y las referencias en los textos se actualizan).
 4. Al abrirse, crea la cuenta de **administrador** y el primer proyecto (su prefijo numera las incidencias: `INC-001`).
-5. Windows puede preguntar si permites a DEV CONTROL comunicarse en redes privadas: acepta. Si no lo preguntó y los
-   demás no pueden conectar, usa **Permitir en el Firewall de Windows** en el menú del icono de la bandeja.
+5. Haz clic derecho en el icono de la bandeja → **Permitir en el Firewall de Windows** y acepta: abre el servidor y
+   las llamadas (puertos 8765, 8766 y 50000–50199) solo para redes privadas.
 6. Apunta la IP del anfitrión (con Tailscale, la `100.x.y.z` que muestra su icono).
 
 ## 2. Equipos miembros

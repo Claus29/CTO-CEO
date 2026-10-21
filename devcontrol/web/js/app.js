@@ -7,6 +7,7 @@ import {
 import {
   can, canAny, entityHash, loadSession, openNotification, pollLocal, refreshCounters, setProject, startSync, stopSync, store,
 } from './state.js';
+import { callsAvailable, inCall, openCallsPanel, startCalls, stopCalls } from './calls.js';
 
 const root = document.getElementById('app');
 
@@ -118,6 +119,8 @@ function buildShell() {
   const title = h('div', { class: 'title' });
   const content = h('main', { class: 'content', id: 'content' });
   const banner = h('div', { class: 'offline-banner hidden' });
+  const obsolete = h('div', { class: 'obsolete-banner hidden', role: 'status' });
+  const callsBtn = h('button', { class: 'btn ghost icon calls-btn hidden', title: 'Llamadas', onclick: openCallsPanel }, icon('phone'));
   const me = h('div', { class: 'me' });
   const sidebar = h('aside', { class: 'sidebar' },
     h('a', { class: 'brand', href: '#/panel' }, h('span', { class: 'logo' }, 'DEV', h('b', null, ' CONTROL'))),
@@ -127,10 +130,10 @@ function buildShell() {
     title, h('div', { class: 'grow' }),
     projectSel,
     h('button', { class: 'search-btn', onclick: openPalette, title: 'Buscar (Ctrl+K)' }, icon('search', 15), h('span', null, 'Buscar…'), h('kbd', null, 'Ctrl K')),
-    timer, connPill, bell);
-  const el = h('div', { class: 'app' }, sidebar, h('div', { class: 'main' }, top, banner, content));
+    timer, connPill, callsBtn, bell);
+  const el = h('div', { class: 'app' }, sidebar, h('div', { class: 'main' }, top, obsolete, banner, content));
   mount(root, el);
-  shell = { nav, projectSel, connPill, bell, timer, title, content, banner, me };
+  shell = { nav, projectSel, connPill, bell, timer, title, content, banner, me, obsolete, callsBtn };
   renderNav(); renderProjects(); renderMe(); renderConn(); renderCounters();
 }
 
@@ -342,10 +345,23 @@ function showConnection() {
 
 // ---------- actualización obligatoria ----------
 let updateOverlay = null;
+let forcedUpdate = false;
+let obsoleteMinimized = false;
+let ackedUpdate = false;
 function renderUpdate(force) {
+  if (force) forcedUpdate = true;
   const u = store.local?.update;
-  const mandatory = force || (u && u.mandatory);
-  if (!mandatory) { if (updateOverlay) { updateOverlay.remove(); updateOverlay = null; } return; }
+  const mandatory = forcedUpdate || (u && u.mandatory);
+  renderObsolete(u, mandatory);
+  if (u?.last_update && !ackedUpdate) {
+    ackedUpdate = true;
+    const lu = u.last_update;
+    if (lu.result === 'ok') toast(`DEV CONTROL se ha actualizado a la versión ${lu.to} correctamente.`, 'ok', { title: 'Actualización completada', sticky: true });
+    else if (lu.result === 'revertida' || lu.result === 'fallo') toast(`La actualización a ${lu.to} no se completó y se ha vuelto a la versión ${lu.reverted_to || lu.from}. Tus datos están a salvo. Detalle en Documentos\\DEV CONTROL\\Actualizaciones\\registro.txt.`, 'error', { title: 'Actualización revertida', sticky: true });
+    api.local('POST', '/local/update/ack').catch(() => {});
+  }
+  // Nunca se corta una llamada: la ventana obligatoria espera a que se cuelgue.
+  if (!mandatory || inCall()) { if (updateOverlay) { updateOverlay.remove(); updateOverlay = null; } return; }
   if (!updateOverlay) { updateOverlay = h('div', { class: 'overlay update-overlay' }); document.body.appendChild(updateOverlay); }
   const st = u || {};
   const progress = st.state === 'downloading' && st.progress != null ? Math.round(st.progress * 100) : null;
@@ -365,9 +381,42 @@ function renderUpdate(force) {
     h('div', { class: 'small muted' }, 'Tus datos no se tocan: antes de actualizar se hace una copia de seguridad en Documentos\\DEV CONTROL.'),
     h('div', { class: 'row end' }, st.can_apply === false && st.manual_url ? h('a', { class: 'btn', href: st.manual_url, target: '_blank' }, 'Descargar a mano') : null, btn)));
 }
+
+// Franja permanente: si hay una versión más nueva, siempre se avisa de que este programa está obsoleto.
+function renderObsolete(u, mandatory) {
+  const el = shell?.obsolete;
+  if (!el) return;
+  const pending = u && (u.available || mandatory);
+  if (!pending) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.classList.toggle('min', obsoleteMinimized);
+  const working = ['downloading', 'verifying', 'applying', 'preparing'].includes(u.state);
+  const action = u.can_apply ? h('button', { class: 'btn sm primary', disabled: working, onclick: (e) => busy(e.target, () => api.local('POST', '/local/update/apply')).then(pollLocal) },
+    working ? (u.state_label || 'Actualizando…') : 'Actualizar ahora')
+    : h('a', { class: 'btn sm', href: u.manual_url, target: '_blank' }, 'Descargar la versión nueva');
+  if (obsoleteMinimized) {
+    mount(el, icon('alert', 14), h('b', null, `DEV CONTROL ${u.current} está obsoleto.`), h('span', { class: 'grow' }), action,
+      h('button', { class: 'btn ghost sm', onclick: () => { obsoleteMinimized = false; renderUpdate(); } }, 'Ver'));
+    return;
+  }
+  const latest = u.latest || u.required;
+  mount(el, icon('alert', 16),
+    h('div', { class: 'grow' }, h('b', null, `Tu versión de DEV CONTROL (${u.current}) está obsoleta.`), ' ',
+      latest ? `Hay una versión nueva (${latest}). ` : '',
+      mandatory && inCall() ? 'La actualización es obligatoria y se pedirá al terminar la llamada.' :
+        mandatory ? 'Es obligatorio actualizar.' : 'Actualiza para tener las últimas mejoras y correcciones.'),
+    action, h('button', { class: 'btn ghost sm', title: 'Minimizar (volverá a aparecer al abrir el programa)', onclick: () => { obsoleteMinimized = true; renderUpdate(); } }, 'Minimizar'));
+}
+
 on('update-required', () => { pollLocal().then(() => renderUpdate(true)); });
 
-on('local-status', () => { renderConn(); renderUpdate(); });
+on('local-status', () => { renderConn(); renderUpdate(); renderCallsBtn(); if (shell && callsAvailable()) startCalls(); });
+on('call-changed', () => { renderUpdate(); renderCallsBtn(); });
+function renderCallsBtn() {
+  if (!shell) return;
+  shell.callsBtn.classList.toggle('hidden', !callsAvailable());
+  shell.callsBtn.classList.toggle('active-call', inCall());
+}
 on('counters', renderCounters);
 on('presence', () => {});
 on('project', () => { renderProjects(); route(); });
@@ -556,6 +605,7 @@ async function showGate() {
 }
 
 async function logout(changeServer) {
+  stopCalls();
   try { await api.post('/api/logout'); } catch { /* sin conexión */ }
   api.setToken(null);
   stopSync();
@@ -576,6 +626,9 @@ async function start() {
   if (store.gate) return showGate();
   buildShell();
   startSync();
+  startCalls();
+  renderCallsBtn();
+  renderUpdate();
   renderTimer();
   if (!location.hash || location.hash === '#/') location.hash = '#/panel';
   else route();

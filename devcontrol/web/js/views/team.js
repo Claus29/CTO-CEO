@@ -1,5 +1,6 @@
 // Equipo: en qué trabaja cada uno, carga de trabajo, ausencias, daily asíncrono y registros de tiempo.
 import { api } from '../api.js';
+import { callButtons } from '../calls.js';
 import { can, canAny, entityHash, store, userById } from '../state.js';
 import {
   addDays, avatar, busy, clear, confirmDialog, emptyState, errorBox, field, fmtDate, fmtDateTime, fmtDuration, fmtHours,
@@ -61,7 +62,8 @@ async function nowTab({ ctx, body, persona }) {
         h('div', { class: 'row' }, avatar(u, p.online),
           h('div', { class: 'grow' }, h('b', null, p.user_name),
             h('div', { class: 'tiny muted' }, p.online ? 'En línea' : p.last_seen_at ? `Visto ${fmtRelative(p.last_seen_at)}` : 'Aún no se ha conectado', u.role_label ? ` · ${u.role_label}` : '')),
-          h('span', { class: 'tiny muted', title: 'Tiempo registrado hoy' }, icon('clock', 13), ' ', fmtDuration(p.today_seconds || 0), ' hoy')),
+          h('span', { class: 'tiny muted', title: 'Tiempo registrado hoy' }, icon('clock', 13), ' ', fmtDuration(p.today_seconds || 0), ' hoy'),
+          callButtons({ userId: p.user_id })),
         p.timer ? h('div', { class: 'callout ok row mt' }, icon('play', 14),
           h('div', { class: 'grow ellipsis' }, 'Cronómetro en marcha: ', h('a', { href: entityHash(p.timer.entity_type, p.timer.entity_id, p.timer.key) }, p.timer.key || ''),
             ' ', h('span', { class: 'muted' }, p.timer.title || '')),

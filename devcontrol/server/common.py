@@ -51,6 +51,7 @@ NOTIFICATION_TYPES = {
     "due_soon": "Fechas objetivo próximas o vencidas", "incident_stale": "Incidencias estancadas",
     "renewal": "Renovaciones a punto de caducar", "store": "Publicaciones en tiendas",
     "standup": "Daily y bloqueos declarados", "reminder": "Recordatorios",
+    "call_incoming": "Llamadas entrantes", "call_missed": "Llamadas perdidas",
     "daily_summary": "Resumen diario", "weekly_summary": "Resumen semanal", "system": "Sistema y seguridad",
 }
 

@@ -38,7 +38,7 @@ RESPONSE_HEADERS = ("content-type", "content-disposition", "x-content-type-optio
                     "cache-control")
 CSP = ("default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; "
        "script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-NO_CACHE_PATHS = ("/api/changes", "/api/attachments/", "/api/export/", "/api/backups/", "/api/vault")
+NO_CACHE_PATHS = ("/api/changes", "/api/attachments/", "/api/export/", "/api/backups/", "/api/vault", "/api/calls")
 MAX_PROFILES = 8
 
 mimetypes.add_type("text/javascript", ".js")
@@ -296,7 +296,7 @@ class Agent:
         host_status = self.hooks["host_status"]() if "host_status" in self.hooks else None
         default_host, default_port = self.cfg.default_server_address()
         return {
-            "app": APP_NAME, "version": APP_VERSION, "server": self.server_key,
+            "app": APP_NAME, "version": APP_VERSION, "server": self.server_key, "server_host": self.server_host,
             "server_label": format_server_address(self.server_host, self.server_port),
             "server_is_default": self.server_is_default,
             "default_server_label": "este equipo" if self.cfg.is_host and not self.cfg.default_server
@@ -611,6 +611,10 @@ class AgentHandler(BaseHTTPRequestHandler):
     def _local(self, path: str):
         agent = self.agent
         method = self.command
+        # Las páginas web ajenas no pueden enviar JSON a 127.0.0.1 sin una consulta previa que aquí no se acepta.
+        if method in ("POST", "PUT", "DELETE") and path not in ("/local/show", "/local/shutdown") and \
+                not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return self._json(415, {"error": "tipo_no_valido", "message": "Petición no válida."})
         if path == "/local/status" and method == "GET":
             return self._json(200, agent.status())
         if path == "/local/connect" and method == "POST":
@@ -665,6 +669,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "no_disponible", "message": "No disponible en este equipo."})
             agent.hooks["open_path"](places[what])
             return self._json(200, {"ok": True, "path": str(places[what])})
+        if path == "/local/attention" and method == "POST":
+            # Llamada entrante: aviso de Windows y ventana delante aunque estuviera oculta.
+            data = self._json_body()
+            if "notify" in agent.hooks:
+                agent.hooks["notify"](str(data.get("title") or APP_NAME)[:120], str(data.get("body") or "")[:300], True)
+            if data.get("show") and "show" in agent.hooks:
+                threading.Thread(target=agent.hooks["show"], daemon=True).start()
+            return self._json(200, {"ok": True})
         if path == "/local/notify" and method == "POST":
             data = self._json_body()
             if "notify" in agent.hooks:

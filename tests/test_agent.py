@@ -102,3 +102,11 @@ def test_save_export_to_documents(stack, layout):
 def test_old_server_version_marks_update(stack):
     stack["agent"].updater.note_server({"version": "9.0.0"})
     assert stack["local"].get("/local/update")["state"] == "idle"
+
+
+def test_local_actions_require_json(stack):
+    local = stack["local"]
+    code, _ = local.call("POST", "/local/attention", {"title": "x"}, headers={"Content-Type": "text/plain"})
+    assert code == 415
+    assert local.post("/local/attention", {"title": "Llamada", "show": False})["ok"]
+    assert local.get("/local/status")["server_host"] == "127.0.0.1"

@@ -34,6 +34,8 @@ tareas y tablero, planificación, calidad, chat, wiki y mucho más, en un progra
 - **Calidad**: builds, planes y ejecuciones de prueba (un fallo se convierte en incidencia) y publicaciones en tiendas.
 - **Equipo**: carga de trabajo frente a capacidad, ausencias, **daily asíncrono**, registro de tiempo y «quién hace qué ahora».
 - **Chat** por canales con respuestas, menciones, adjuntos, recordatorios y «convertir en tarea».
+- **Llamadas de voz y vídeo** entre cuentas, de 2 o de grupo, con compartir pantalla: directas entre equipos o a
+  través del anfitrión si no pueden verse ([docs/LLAMADAS.md](docs/LLAMADAS.md)).
 - **Conocimiento**: wiki con historial y **registro de decisiones** (`DEC-001`).
 - **Bóveda** cifrada para secretos del equipo (AES-GCM + scrypt), con registro de accesos.
 - **Integración con GitHub**: los commits y PR que citan `APP-012` se enlazan; una PR fusionada deja la incidencia

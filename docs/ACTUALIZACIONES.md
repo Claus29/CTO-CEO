@@ -7,6 +7,11 @@
 - **Miembros**: deben actualizarse en cuanto el anfitrión tiene una versión más nueva que la suya, o si el servidor
   exige una versión mínima (respuesta HTTP 426). Así nunca hay miembros por delante de un anfitrión sin actualizar.
 - Una versión puede marcar una **versión mínima de seguridad**: por debajo de ella la actualización es obligatoria siempre.
+- **Aviso permanente de versión obsoleta:** mientras exista una versión más nueva, cualquier equipo ve una franja
+  «Tu versión de DEV CONTROL está obsoleta» con «Actualizar ahora» (se puede minimizar, pero vuelve al abrir), recibe
+  un aviso de Windows al abrir y cada 4 horas, y el icono de la bandeja se pone ámbar.
+- **Nunca se corta una llamada:** si la actualización pasa a ser obligatoria durante una llamada, la ventana
+  obligatoria aparece al colgar.
 - **Sin Internet nunca se bloquea el trabajo.** Si un miembro debe actualizarse y no puede descargarla, se le ofrece el
   enlace para hacerlo a mano.
 

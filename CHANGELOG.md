@@ -2,6 +2,20 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.1.0] - 2026-10-21
+
+- **Llamadas de voz y vídeo entre cuentas**, de 2 personas o de grupo (hasta 8), con compartir pantalla. Se llama a
+  la persona: suena en todos sus equipos con DEV CONTROL abierto y sigue en el que conteste.
+- Funcionan desde cualquier red que llegue al anfitrión: si los equipos no pueden verse directamente, la llamada pasa
+  sola por el repetidor integrado en el anfitrión (cifrada de extremo a extremo).
+- Aviso de Windows y ventana delante al recibir una llamada, llamadas perdidas, «No molestar», historial y registro en
+  los canales. Ocupado, llamadas cruzadas, cortes de red y cierres inesperados se resuelven sin llamadas fantasma.
+- Permiso nuevo «Hacer y recibir llamadas» (activado para todos los roles salvo Observador).
+- Aviso permanente de **versión obsoleta**: franja en el programa, aviso de Windows al abrir y cada 4 horas, e icono
+  ámbar en la bandeja. La actualización obligatoria nunca interrumpe una llamada: se pide al colgar.
+- El servidor exige la versión 2.1.0 a todos los equipos (para que todos tengan llamadas).
+- «Permitir en el Firewall de Windows» abre también los puertos de las llamadas.
+
 ## [2.0.1] - 2026-10-20
 
 - Instalador: recuperar datos anteriores ya es de verdad opcional. En la pantalla «¿Qué papel tiene este equipo?»

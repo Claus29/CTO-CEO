@@ -54,6 +54,14 @@ jobs:
           python -m devcontrol --sin-ventana &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8770/local/status >/dev/null && break; sleep 1; done
           node tools/e2e_tour.mjs http://127.0.0.1:8770/ capturas
+      - name: Llamadas reales entre varios usuarios (directas y por el repetidor)
+        run: |
+          export DEVCONTROL_HOME="$RUNNER_TEMP/dchome2"
+          mkdir -p "$DEVCONTROL_HOME/Local"
+          printf "[instalacion]\nrol = anfitrion\npuerto = 8785\niniciar_con_windows = no\n" > "$DEVCONTROL_HOME/Local/instalacion.ini"
+          python -m devcontrol --sin-ventana --puerto-local 8795 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8795/local/status >/dev/null && break; sleep 1; done
+          node tools/e2e_calls.mjs http://127.0.0.1:8795/ capturas/llamadas
       - uses: actions/upload-artifact@v4
         if: always()
         with:

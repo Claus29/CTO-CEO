@@ -1,6 +1,7 @@
 // Chat del equipo: canales, respuestas citadas, menciones, adjuntos, recordatorios,
 // convertir mensajes en tareas o decisiones, confirmaciones de lectura y envío sin conexión.
 import { api } from '../api.js';
+import { callButtons } from '../calls.js';
 import { activeProjects, can, defaultProjectId, entityHash, projectById, refreshCounters, store, userById } from '../state.js';
 import { PRIORITIES, toOptions } from '../labels.js';
 import {
@@ -122,6 +123,7 @@ export default async function render(ctx) {
       h('div', { class: 'tiny muted' }, channel?.kind === 'general' ? 'Canal de todo el equipo'
         : channel?.project_id ? `Canal del proyecto ${projectById(channel.project_id)?.name || channel.project_key || ''}` : 'Canal personalizado'));
     clear(headMenu);
+    if (channel) { const cb = callButtons({ channelId: channel.id }); if (cb) headMenu.appendChild(cb); }
     if (channel && channel.kind !== 'general' && can('chat.canales')) {
       headMenu.appendChild(menuButton(icon('dots'), [
         { label: 'Cambiar el nombre', icon: 'edit', onClick: renameChannel },

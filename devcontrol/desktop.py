@@ -210,6 +210,7 @@ class App:
             return True
 
         self.window.events.closing += on_closing
+        self.window.events.loaded += self._grant_media_permissions
         self.agent.hooks["notify"] = self.notify
         storage = self.layout.window_dir
         storage.mkdir(parents=True, exist_ok=True)
@@ -217,11 +218,41 @@ class App:
         self.quit()
         return 0
 
+    def _grant_media_permissions(self) -> None:
+        """Concede micrófono, cámara y pantalla a la propia interfaz (solo 127.0.0.1) sin preguntar cada vez."""
+        if getattr(self, "_granted", False) or os.name != "nt":
+            return
+        self._granted = True
+        try:
+            from Microsoft.Web.WebView2.Core import CoreWebView2PermissionKind as Kind  # type: ignore
+            from Microsoft.Web.WebView2.Core import CoreWebView2PermissionState as State  # type: ignore
+            from System import Action  # type: ignore
+            form = self.window.native
+            own = self.agent.url.rstrip("/")
+            allowed = {Kind.Microphone, Kind.Camera, Kind.Notifications}
+            for extra in ("WindowManagement", "OtherSensors"):
+                if hasattr(Kind, extra):
+                    allowed.add(getattr(Kind, extra))
+
+            def on_permission(sender, args):
+                if str(args.Uri).startswith(own) and args.PermissionKind in allowed:
+                    args.State = State.Allow
+
+            def attach():
+                form.webview.CoreWebView2.PermissionRequested += on_permission
+            form.Invoke(Action(attach))
+        except Exception:
+            self.log.warning("No se pudieron conceder los permisos de micrófono y cámara automáticamente; "
+                             "Windows los pedirá la primera vez.")
+
     def show_window(self) -> None:
         if self.window is not None:
             try:
                 self.window.show()
                 self.window.restore()
+                # Traer delante aunque otra ventana tenga el foco (llamadas entrantes).
+                self.window.on_top = True
+                self.window.on_top = False
             except Exception:
                 pass
         elif not self.headless:
@@ -264,6 +295,8 @@ class App:
             return "bad", "Sin conexión con el servidor"
         if upd.get("mandatory"):
             return "warn", "Actualización obligatoria pendiente"
+        if upd.get("available"):
+            return "warn", f"Versión obsoleta: hay una nueva ({upd.get('latest')})"
         if a.outbox.pending_count():
             return "warn", f"Enviando {a.outbox.pending_count()} cambios pendientes"
         return "ok", "Servidor en marcha" if self.cfg.is_host else "Conectado"
@@ -313,8 +346,17 @@ class App:
         threading.Thread(target=self._tray_loop, name="bandeja", daemon=True).start()
 
     def _tray_loop(self) -> None:
+        last_obsolete = 0.0
         while not self.stop_event.wait(3):
             self.refresh_tray()
+            # Mientras haya una versión más nueva, se avisa al abrir y cada 4 horas.
+            upd = self.updater.status()
+            if (upd.get("available") or upd.get("mandatory")) and time.monotonic() - last_obsolete >= 4 * 3600 \
+                    or (upd.get("available") and not last_obsolete):
+                last_obsolete = time.monotonic()
+                self.notify(f"{APP_NAME} está obsoleto",
+                            f"Tienes la versión {upd.get('current')} y hay una nueva ({upd.get('latest') or upd.get('required')}). "
+                            "Abre DEV CONTROL y pulsa «Actualizar ahora».")
 
     def refresh_tray(self) -> None:
         if self.tray is None:
@@ -341,7 +383,7 @@ class App:
 
     def allow_firewall(self) -> None:
         from .winutil import allow_in_firewall
-        if not allow_in_firewall(self.cfg.server_port):
+        if not allow_in_firewall(self.cfg.server_port, self.cfg.call_port, self.cfg.relay_ports):
             self.notify(APP_NAME, "No se pudo pedir permiso para el Firewall.")
 
 

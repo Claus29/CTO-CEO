@@ -17,6 +17,7 @@ from .paths import Layout, default_layout
 
 DEFAULT_SERVER_PORT = 8765
 DEFAULT_LOCAL_PORT = 8770
+DEFAULT_CALL_PORT = 8766
 PRIVATE_NETWORKS = ("100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fd00::/8",
                     "fd7a:115c:a1e0::/48")
 DEFAULT_BLOCKED_EXTENSIONS = "exe, bat, cmd, com, scr, msi, ps1, vbs, vbe, jse, wsf, jar, reg, lnk, hta, cpl"
@@ -35,6 +36,10 @@ rol = {rol}
 [servidor]
 ; Solo se usa si este equipo es el anfitrión.
 puerto = {puerto}
+; Puerto del repetidor de llamadas (UDP y TCP). Los audios y vídeos que no pueden ir directos
+; entre equipos pasan por aquí. Rango de puertos que usa para reenviar (UDP).
+puerto_llamadas = {puerto_llamadas}
+puertos_reenvio = 50000-50199
 ; Direcciones en las que escuchar, separadas por comas. "auto" = todas las
 ; redes privadas de este equipo (Tailscale, VPN, red local). Nunca Internet.
 escuchar = auto
@@ -108,6 +113,8 @@ class Config:
     layout: Layout | None = None
     role: str = "miembro"
     server_port: int = DEFAULT_SERVER_PORT
+    call_port: int = DEFAULT_CALL_PORT
+    relay_ports: tuple = (50000, 50199)
     listen: list = field(default_factory=lambda: ["auto"])
     allowed_networks: list = field(default_factory=lambda: list(PRIVATE_NETWORKS))
     allowed_clients: list = field(default_factory=list)
@@ -199,6 +206,7 @@ def ensure_config_file(layout: Layout) -> Path:
     values = {
         "rol": install.get("instalacion", "rol", fallback="miembro"),
         "puerto": install.get("instalacion", "puerto", fallback=str(DEFAULT_SERVER_PORT)),
+        "puerto_llamadas": str(DEFAULT_CALL_PORT),
         "servidor": install.get("instalacion", "servidor", fallback=""),
         "autostart": "si" if _yes(install.get("instalacion", "iniciar_con_windows", fallback="si")) else "no",
         "puerto_local": str(DEFAULT_LOCAL_PORT),
@@ -243,6 +251,15 @@ def load_config(layout: Layout | None = None, path: Path | None = None) -> Confi
     if cfg.role not in ("anfitrion", "miembro"):
         raise ConfigError("[general] rol debe ser «anfitrion» o «miembro».")
     cfg.server_port = get_int("servidor", "puerto", DEFAULT_SERVER_PORT)
+    cfg.call_port = get_int("servidor", "puerto_llamadas", DEFAULT_CALL_PORT)
+    raw_range = get("servidor", "puertos_reenvio", "50000-50199")
+    try:
+        lo, hi = (int(x) for x in raw_range.split("-"))
+        if not 1024 <= lo < hi <= 65535:
+            raise ValueError
+    except ValueError:
+        raise ConfigError("[servidor] puertos_reenvio debe ser un rango como 50000-50199.") from None
+    cfg.relay_ports = (lo, hi)
     cfg.listen = [x.strip() for x in get("servidor", "escuchar", "auto").split(",") if x.strip()] or ["auto"]
     for addr in cfg.listen:
         if addr != "auto":
@@ -271,8 +288,8 @@ def load_config(layout: Layout | None = None, path: Path | None = None) -> Confi
     for port, label in ((cfg.server_port, "[servidor] puerto"), (cfg.local_port, "[cliente] puerto_local")):
         if not 1024 <= port <= 65535:
             raise ConfigError(f"{label} debe estar entre 1024 y 65535.")
-    if cfg.server_port == cfg.local_port:
-        raise ConfigError("[servidor] puerto y [cliente] puerto_local no pueden ser iguales.")
+    if len({cfg.server_port, cfg.local_port, cfg.call_port}) < 3:
+        raise ConfigError("[servidor] puerto, [servidor] puerto_llamadas y [cliente] puerto_local deben ser distintos.")
     return cfg
 
 
