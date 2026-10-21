@@ -11,6 +11,8 @@ Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 - En cuanto el anfitrión tiene una versión más nueva, los miembros la piden al momento; el anfitrión descarga el
   instalador por adelantado para que esté listo.
 - Mensajes claros si la clave falta, caduca o no tiene permiso.
+- Llamadas: si Windows tiene reservados los puertos del repetidor (pasa con Hyper-V, WSL o Docker), se usa otro
+  puerto libre en lugar de fallar.
 
 ## [2.1.0] - 2026-10-21
 

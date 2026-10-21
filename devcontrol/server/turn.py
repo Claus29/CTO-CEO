@@ -576,8 +576,10 @@ class TurnServer:
     def _open_relay(self, ip: str) -> socket.socket | None:
         lo, hi = self.port_range
         start = secrets.randbelow(hi - lo + 1)
-        for i in range(hi - lo + 1):
-            port = lo + (start + i) % (hi - lo + 1)
+        # Si Windows tiene reservado todo el rango (Hyper-V, WSL o Docker reservan bloques de puertos al azar),
+        # se usa un puerto libre cualquiera: la regla del Firewall para el programa también lo cubre.
+        ports = [lo + (start + i) % (hi - lo + 1) for i in range(hi - lo + 1)] + [0]
+        for port in ports:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
                 # La reserva se ata a la IP anunciada: así los paquetes salen con esa IP de origen y los

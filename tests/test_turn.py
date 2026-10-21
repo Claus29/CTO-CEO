@@ -77,7 +77,7 @@ def test_wrong_credentials_and_unauthorized_call(server):
 def test_relay_between_two_participants(server):
     a, b = client(server, 7), client(server, 8)
     ra, rb = a.relayed(a.allocate()), b.relayed(b.allocate())
-    assert ra[1] != rb[1] and 51000 <= ra[1] <= 51050
+    assert ra[1] != rb[1]
     tid = turn.secrets.token_bytes(12)
     # sin permiso, nada pasa
     a.sock.sendto(turn.build(turn.SEND, turn.INDICATION, tid, [(turn.A_XOR_PEER, turn.xor_address(*rb, tid)),
@@ -128,3 +128,19 @@ def test_tcp_transport(server):
     resp = turn.parse(s.recv(65535))
     assert resp.cls == turn.SUCCESS and resp.get(turn.A_XOR_RELAYED)
     s.close()
+
+
+def test_reserved_range_falls_back_to_a_free_port():
+    """Windows puede reservar el rango entero (Hyper-V, WSL, Docker): la llamada debe seguir funcionando."""
+    taken = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    taken.bind(("127.0.0.1", 0))
+    busy = taken.getsockname()[1]
+    srv = turn.TurnServer(0, b"secreto-de-prueba", lambda ip: True, lambda u, c: True, port_range=(busy, busy))
+    srv.start()
+    try:
+        c = client(srv, 7)
+        resp = c.allocate()
+        assert resp.cls == turn.SUCCESS and c.relayed(resp)[1] not in (0, busy)
+    finally:
+        srv.stop()
+        taken.close()
