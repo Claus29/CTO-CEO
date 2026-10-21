@@ -38,13 +38,21 @@ class App:
         self._server_lock = threading.RLock()
         from .agent.main import Agent
         from .updater import Updater
-        self.updater = Updater(self.layout, self.cfg, hooks={"prepare_update": self.prepare_update, "quit": self.quit})
+        self.updater = Updater(self.layout, self.cfg, hooks={"prepare_update": self.prepare_update, "quit": self.quit,
+                                                             "server_url": self._server_url})
         self.agent = Agent(self.cfg, self.layout, updater=self.updater)
         if port is not None:
             self.agent.local_port = port
         self.agent.hooks.update(open_path=open_path, show=self.show_window, quit=self.quit)
         if self.cfg.is_host:
             self.agent.hooks.update(host_status=self.host_status, host_start=self.start_server, host_stop=self.stop_server)
+
+    def _server_url(self) -> str | None:
+        """Servidor del que los miembros reciben las actualizaciones (el anfitrión)."""
+        if self.cfg.is_host:
+            return None
+        host, port = self.agent.server_host, self.agent.server_port
+        return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
 
     # -- servidor (solo anfitrión) ---------------------------------------------------
     def _import_path(self) -> Path | None:

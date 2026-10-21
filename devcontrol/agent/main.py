@@ -694,6 +694,15 @@ class AgentHandler(BaseHTTPRequestHandler):
             except RuntimeError as exc:
                 return self._json(400, {"error": "actualizacion", "message": str(exc)})
             return self._json(200, agent.update_status())
+        if path == "/local/update/token" and method == "POST":
+            if not hasattr(agent.updater, "set_token"):
+                return self._json(400, {"error": "actualizacion", "message": "No disponible."})
+            try:
+                agent.updater.set_token(str(self._json_body().get("token") or ""))
+            except ValueError as exc:
+                return self._json(400, {"error": "clave_no_valida", "message": str(exc)})
+            threading.Thread(target=agent.updater.check, kwargs={"force": True}, daemon=True).start()
+            return self._json(200, agent.update_status())
         if path == "/local/update/ack" and method == "POST":
             if hasattr(agent.updater, "ack"):
                 agent.updater.ack()

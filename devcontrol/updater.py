@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -105,10 +106,34 @@ def write_marker(layout: Layout, data: dict) -> None:
     os.replace(tmp, layout.updates_dir / MARKER)
 
 
-def _http_get(url: str, timeout: float = 20) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": f"DEV-CONTROL/{APP_VERSION}",
-                                               "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def open_url(url: str, headers: dict | None = None, timeout: float = 20):
+    """Abre una URL siguiendo redirecciones a mano: la clave de GitHub nunca se envía a otro servidor
+    (las descargas de GitHub redirigen a su almacenamiento, que rechaza peticiones con esa cabecera)."""
+    headers = {"User-Agent": f"DEV-CONTROL/{APP_VERSION}", **(headers or {})}
+    origin = urllib.parse.urlsplit(url).netloc
+    for _ in range(6):
+        req = urllib.request.Request(url, headers=headers if urllib.parse.urlsplit(url).netloc == origin else
+                                     {k: v for k, v in headers.items() if k.lower() != "authorization"})
+        try:
+            return _opener.open(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
+                url = urllib.parse.urljoin(url, exc.headers["Location"])
+                continue
+            raise
+    raise urllib.error.URLError("Demasiadas redirecciones")
+
+
+def _http_get(url: str, headers: dict | None = None, timeout: float = 20) -> bytes:
+    with open_url(url, headers, timeout) as resp:
         return resp.read()
 
 
@@ -127,6 +152,45 @@ class Updater:
         self.server_version: str | None = None
         self.required: dict | None = None
         self.stop_event = threading.Event()
+        self.source: str | None = None           # "github" o "anfitrion"
+        self.installer_url: str | None = None
+        self.last_server_check = 0.0
+
+    # -- clave de acceso a GitHub (repositorio privado) -----------------------------------------
+    @property
+    def token_file(self) -> Path:
+        return self.layout.local_root / "github-token.bin"
+
+    def get_token(self) -> str:
+        try:
+            from .winutil import unprotect
+            return unprotect(self.token_file.read_bytes()).decode("utf-8").strip()
+        except (OSError, ValueError, UnicodeDecodeError):
+            return ""
+
+    def set_token(self, token: str) -> None:
+        token = (token or "").strip()
+        if not token:
+            self.token_file.unlink(missing_ok=True)
+            return
+        if len(token) > 400 or any(ch.isspace() for ch in token):
+            raise ValueError("La clave de acceso no es válida.")
+        from .winutil import protect
+        self.layout.local_root.mkdir(parents=True, exist_ok=True)
+        tmp = self.token_file.with_suffix(".tmp")
+        tmp.write_bytes(protect(token.encode("utf-8")))
+        os.replace(tmp, self.token_file)
+
+    def _gh_headers(self, accept: str = "application/vnd.github+json") -> dict:
+        headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
+        token = self.get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    def server_url(self) -> str | None:
+        fn = self.hooks.get("server_url")
+        return fn() if fn else None
 
     # -- estado ---------------------------------------------------------------
     @property
@@ -142,6 +206,13 @@ class Updater:
             self.server_version = (info or {}).get("version") or self.server_version
             if required is not None:
                 self.required = required
+            known = (self.latest or {}).get("version") or APP_VERSION
+            # El anfitrión ya tiene una versión más nueva: se pide enseguida (sin esperar a la comprobación periódica).
+            need = (is_newer(self.server_version, known) or self.required) and not self.cfg.is_host
+            busy = self.state in ("checking", "downloading", "verifying", "preparing", "applying")
+            if need and not busy and time.time() - self.last_server_check > 60:
+                self.last_server_check = time.time()
+                threading.Thread(target=self.check, kwargs={"force": True}, daemon=True).start()
 
     def _mandatory(self) -> tuple[bool, str]:
         latest = self.latest or {}
@@ -175,6 +246,8 @@ class Updater:
                 "installed": bool(getattr(sys, "frozen", False)), "manual_url": self.manual_url,
                 "last_check": datetime.fromtimestamp(self.last_check).isoformat() if self.last_check else None,
                 "last_update": marker if marker and marker.get("result") and not marker.get("shown") else None,
+                "source": self.source or ("github" if self.cfg.is_host else "anfitrion"),
+                "token_configured": bool(self.get_token()), "is_host": bool(self.cfg.is_host),
                 "log_tail": self.log_tail(),
             }
 
@@ -189,6 +262,8 @@ class Updater:
 
     # -- comprobar ----------------------------------------------------------------
     def check(self, force: bool = False) -> dict | None:
+        """Anfitrión: consulta GitHub (con la clave de acceso si el repositorio es privado).
+        Miembros: piden la versión al anfitrión, que se la sirve por la red privada."""
         with self.lock:
             if self.state in ("downloading", "verifying", "preparing", "applying"):
                 return self.latest
@@ -196,20 +271,19 @@ class Updater:
                 return self.latest
             self.state, self.error = "checking", ""
         try:
-            rel = json.loads(self.http_get(f"https://api.github.com/repos/{self.repo}/releases/latest"))
-            assets = {a.get("name"): a.get("browser_download_url") for a in rel.get("assets", [])}
-            if MANIFEST not in assets or SIGNATURE not in assets:
-                raise UpdateError("La última versión publicada no tiene manifiesto firmado.")
-            raw = self.http_get(assets[MANIFEST])
-            sig = self.http_get(assets[SIGNATURE])
-            manifest = verify_manifest(raw, sig)
+            if self.cfg.is_host or not self.server_url():
+                manifest, raw, sig, url, source = self._check_github()
+            else:
+                manifest, raw, sig, url, source = self._check_server()
             with self.lock:
-                self.latest = manifest
+                if manifest is not None:
+                    self.latest, self.installer_url, self.source = manifest, url, source
                 self.state = "idle"
+            if manifest is not None and source == "github":
+                self._store_for_members(raw, sig)
         except urllib.error.HTTPError as exc:
             with self.lock:
-                # 404 = aún no hay versiones publicadas: no es un error para el usuario.
-                self.state, self.error = "idle", "" if exc.code == 404 else f"GitHub respondió {exc.code}."
+                self.state, self.error = "idle", self._http_error(exc)
         except (urllib.error.URLError, OSError, ValueError) as exc:
             with self.lock:
                 self.state, self.error = "idle", f"No se puede comprobar si hay actualizaciones ({exc})."
@@ -219,6 +293,58 @@ class Updater:
         finally:
             self.last_check = time.time()
         return self.latest
+
+    def _http_error(self, exc) -> str:
+        if exc.code in (401, 403):
+            return ("GitHub ha rechazado la clave de acceso (caducada o sin permiso de lectura). Pon una nueva en "
+                    "Ajustes → Servidor y actualizaciones.")
+        if exc.code == 404:
+            if self.cfg.is_host and not self.get_token():
+                return ("No se ven versiones publicadas. Si el repositorio de GitHub es privado, añade una clave de "
+                        "acceso de solo lectura en Ajustes → Servidor y actualizaciones.")
+            return ""   # aún no hay versiones publicadas
+        return f"GitHub respondió {exc.code}."
+
+    def _check_github(self):
+        rel = json.loads(self.http_get(f"https://api.github.com/repos/{self.repo}/releases/latest",
+                                       self._gh_headers()))
+        assets = {a.get("name"): a.get("url") for a in rel.get("assets", [])}
+        if MANIFEST not in assets or SIGNATURE not in assets:
+            raise UpdateError("La última versión publicada no tiene manifiesto firmado.")
+        raw = self.http_get(assets[MANIFEST], self._gh_headers("application/octet-stream"))
+        sig = self.http_get(assets[SIGNATURE], self._gh_headers("application/octet-stream"))
+        manifest = verify_manifest(raw, sig)
+        name = manifest["installer"].get("name")
+        if name not in assets:
+            raise UpdateError("La versión publicada no incluye el instalador.")
+        return manifest, raw, sig, assets[name], "github"
+
+    def _check_server(self):
+        base = self.server_url()
+        try:
+            data = json.loads(self.http_get(f"{base}/api/update/manifest", {}))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:   # el anfitrión aún no conoce ninguna versión
+                return None, b"", b"", None, "anfitrion"
+            raise
+        raw = base64.b64decode(data["manifest"])
+        sig = data["signature"].encode()
+        manifest = verify_manifest(raw, sig)
+        return manifest, raw, sig, f"{base}/api/update/installer", "anfitrion"
+
+    def _store_for_members(self, raw: bytes, sig) -> None:
+        """El anfitrión guarda la versión firmada y descarga el instalador para servírselo a los demás equipos."""
+        self.layout.updates_dir.mkdir(parents=True, exist_ok=True)
+        (self.layout.updates_dir / MANIFEST).write_bytes(raw)
+        (self.layout.updates_dir / SIGNATURE).write_bytes(sig if isinstance(sig, bytes) else sig.encode())
+        if is_newer(self.latest.get("version"), APP_VERSION) and self.hooks.get("predownload", True):
+            threading.Thread(target=self._predownload, daemon=True).start()
+
+    def _predownload(self) -> None:
+        try:
+            self._download(self.latest["installer"], quiet=True)
+        except Exception as exc:
+            write_log(self.layout, f"No se pudo descargar por adelantado la versión {self.latest.get('version')}: {exc}")
 
     def loop(self) -> None:
         self.stop_event.wait(5)
@@ -240,15 +366,27 @@ class Updater:
             self.state, self.error, self.progress = "downloading", "", 0.0
         threading.Thread(target=self._apply, name="actualizar", daemon=True).start()
 
-    def _download(self, inst: dict) -> Path:
+    def _download(self, inst: dict, quiet: bool = False) -> Path:
         name = Path(inst.get("name") or inst["url"].rsplit("/", 1)[-1]).name
         target = self.layout.updates_dir / name
         if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == inst["sha256"].lower():
             return target
-        partial = target.with_name(target.name + ".parcial")
-        req = urllib.request.Request(inst["url"], headers={"User-Agent": f"DEV-CONTROL/{APP_VERSION}"})
+        partial = target.with_name(target.name + (".previa" if quiet else ".parcial"))
+        if self.source == "anfitrion":
+            url, headers = self.installer_url, {}
+        elif self.installer_url:
+            url, headers = self.installer_url, self._gh_headers("application/octet-stream")
+        else:
+            url, headers = inst["url"], {}
         digest = hashlib.sha256()
-        with urllib.request.urlopen(req, timeout=60) as resp, open(partial, "wb") as fh:
+        try:
+            resp_cm = open_url(url, headers, timeout=60)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 and self.source == "anfitrion":
+                raise UpdateError("El anfitrión todavía no tiene el instalador de la versión nueva. Se podrá instalar "
+                                  "en cuanto el anfitrión la descargue (lo hace solo al detectarla).") from exc
+            raise
+        with resp_cm as resp, open(partial, "wb") as fh:
             total = int(resp.headers.get("Content-Length") or inst.get("size") or 0)
             got = 0
             while True:
@@ -258,9 +396,10 @@ class Updater:
                 fh.write(chunk)
                 digest.update(chunk)
                 got += len(chunk)
-                if total:
+                if total and not quiet:
                     self.progress = min(1.0, got / total)
-        self.state = "verifying"
+        if not quiet:
+            self.state = "verifying"
         if digest.hexdigest() != inst["sha256"].lower() or (inst.get("size") and got != int(inst["size"])):
             partial.unlink(missing_ok=True)
             raise UpdateError("La descarga no coincide con la versión publicada (puede estar dañada). Vuelve a intentarlo.")

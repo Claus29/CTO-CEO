@@ -94,3 +94,39 @@ def allow_in_firewall(port: int, call_port: int | None = None, relay_ports: tupl
 def computer_name() -> str:
     import socket
     return os.environ.get("COMPUTERNAME") or socket.gethostname() or "equipo"
+
+
+# -- datos protegidos para este usuario de Windows (DPAPI) -------------------------------------
+def protect(data: bytes) -> bytes:
+    """Cifra con la cuenta de Windows del usuario (solo él, en este equipo, puede descifrarlo)."""
+    if not IS_WINDOWS:
+        return b"plain:" + data
+    blob_out = _dpapi(data, protect=True)
+    return b"dpapi:" + blob_out
+
+
+def unprotect(data: bytes) -> bytes:
+    if data.startswith(b"plain:"):
+        return data[6:]
+    if data.startswith(b"dpapi:") and IS_WINDOWS:
+        return _dpapi(data[6:], protect=False)
+    raise ValueError("Formato desconocido")
+
+
+def _dpapi(data: bytes, protect: bool) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    buf = ctypes.create_string_buffer(data, len(data))
+    blob_in = Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    blob_out = Blob()
+    fn = ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(blob_in), None, None, None, None, 0x1, ctypes.byref(blob_out)):   # UI_FORBIDDEN
+        raise OSError("No se pudo proteger el dato con la cuenta de Windows.")
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)

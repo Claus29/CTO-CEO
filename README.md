@@ -64,7 +64,8 @@ tareas y tablero, planificación, calidad, chat, wiki y mucho más, en un progra
 
 ## Instalación
 
-1. Descarga `DEVCONTROL-Setup-<versión>.exe` desde [Releases](https://github.com/Claus29/CTO-CEO/releases/latest).
+1. Descarga `DEVCONTROL-Setup-<versión>.exe` desde [Releases](https://github.com/Claus29/CTO-CEO/releases/latest)
+   (el repositorio es privado: hace falta una cuenta de GitHub con acceso).
 2. Ejecútalo (no necesita permisos de administrador). Si Windows SmartScreen avisa de que el editor es desconocido,
    pulsa **Más información → Ejecutar de todas formas** (el instalador no está firmado con un certificado de pago;
    las actualizaciones sí van firmadas por el proyecto).
@@ -89,7 +90,8 @@ Desinstalar o reinstalar **nunca** borra estas carpetas. Más en [docs/DATOS_Y_C
 
 ## Actualizaciones
 
-DEV CONTROL busca versiones nuevas en este repositorio. Si hay una, **la actualización es obligatoria**: el anfitrión
+El anfitrión busca versiones nuevas en este repositorio (privado: con una clave de acceso de solo lectura que se pone
+en Ajustes) y las reparte a los demás equipos, que no necesitan GitHub. Si hay una, **la actualización es obligatoria**: el anfitrión
 se actualiza primero y, en cuanto lo hace, los demás equipos deben actualizarse para seguir trabajando. Cada versión
 está **firmada** (Ed25519) y se comprueba su huella antes de instalarla; antes se hace una copia de seguridad y,
 después, se verifica que la versión nueva arranca y que no falta ningún dato. Si algo falla, se vuelve solo a la

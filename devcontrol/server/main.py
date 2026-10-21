@@ -194,7 +194,7 @@ class ServerApp:
             raise HttpError(403, "red_no_autorizada", "Este equipo no está autorizado para conectarse a este servidor.")
         client_version = req.headers.get("x-devcontrol-version")
         if client_version and parse_version(client_version) < parse_version(MIN_CLIENT_VERSION) \
-                and req.path not in ("/api/health",):
+                and req.path not in ("/api/health", "/api/update/manifest", "/api/update/installer"):
             raise HttpError(426, "actualizacion_obligatoria",
                             f"Este servidor necesita DEV CONTROL {MIN_CLIENT_VERSION} o posterior. Actualiza el programa.",
                             {"min_version": MIN_CLIENT_VERSION, "server_version": APP_VERSION})
@@ -395,6 +395,31 @@ class ServerApp:
         @r.route("POST", "/internal/shutdown", auth=False)
         def shutdown(req):
             return self._internal_shutdown(req)
+
+        # -- actualizaciones para los demás equipos (repositorio privado: solo el anfitrión accede a GitHub) ----
+        @r.route("GET", "/api/update/manifest", auth=False)
+        def update_manifest(req):
+            folder = self.layout.updates_dir
+            raw, sig = folder / "manifest.json", folder / "manifest.json.sig"
+            if not raw.exists() or not sig.exists():
+                raise HttpError(404, "sin_version", "El anfitrión aún no conoce ninguna versión publicada.")
+            import base64
+            return {"manifest": base64.b64encode(raw.read_bytes()).decode(),
+                    "signature": sig.read_text(encoding="ascii").strip()}
+
+        @r.route("GET", "/api/update/installer", auth=False)
+        def update_installer(req):
+            folder = self.layout.updates_dir
+            try:
+                manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+                name = Path(manifest["installer"]["name"]).name
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HttpError(404, "sin_version", "El anfitrión aún no conoce ninguna versión publicada.") from None
+            path = folder / name
+            if not path.is_file():
+                raise HttpError(404, "sin_instalador", "El anfitrión todavía no ha descargado el instalador.")
+            # Cada equipo comprueba la firma del manifiesto y la huella SHA-256 antes de instalar.
+            return Response.file(path, name, "application/octet-stream")
 
         @r.route("GET", "/api/permissions/catalog")
         def catalog(req):

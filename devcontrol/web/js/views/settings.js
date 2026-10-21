@@ -341,6 +341,33 @@ async function githubTab(root, ctx) {
 }
 
 // ---------- Servidor y actualizaciones (lo ve todo el mundo; también se usa en «Mi cuenta») ----------
+// Acceso de solo lectura a un repositorio privado de GitHub (solo en el anfitrión; los demás equipos
+// reciben las actualizaciones de él). La clave se guarda cifrada con la cuenta de Windows de este equipo.
+function githubAccess(u) {
+  const input = h('input', { type: 'password', placeholder: u.token_configured ? '•••••••• (guardada)' : 'github_pat_…', autocomplete: 'off' });
+  const save = h('button', { class: 'btn sm primary', onclick: () => busy(save, async () => {
+    if (!input.value.trim()) throw new Error('Pega la clave de acceso.');
+    await api.local('POST', '/local/update/token', { token: input.value.trim() });
+    input.value = '';
+    await new Promise(r => setTimeout(r, 2500));
+    await pollLocal();
+  }, 'Clave guardada. Comprobando actualizaciones…').catch(() => {}) }, 'Guardar clave');
+  const remove = h('button', { class: 'btn sm ghost', onclick: () => busy(remove, async () => {
+    await api.local('POST', '/local/update/token', { token: '' }); await pollLocal();
+  }, 'Clave quitada.').catch(() => {}) }, 'Quitar');
+  return h('details', { class: 'notes mt', open: !u.token_configured && !!u.error },
+    h('summary', null, 'Acceso a GitHub (repositorio privado) · ', u.token_configured ? h('b', { class: 'ok-text' }, 'configurado') : h('b', { class: 'warn-text' }, 'sin configurar')),
+    h('div', { class: 'col mt' },
+      h('p', { class: 'small' }, 'Si el repositorio de DEV CONTROL en GitHub es privado, este equipo (el anfitrión) necesita una clave de acceso de solo lectura para ver las versiones nuevas. Los demás equipos las reciben del anfitrión.'),
+      h('ol', { class: 'small' },
+        h('li', null, 'En GitHub: tu foto → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.'),
+        h('li', null, 'Repository access: «Only select repositories» y elige el repositorio de DEV CONTROL.'),
+        h('li', null, 'Permissions → Repository permissions → Contents: «Read-only». Nada más.'),
+        h('li', null, 'Genera la clave, cópiala y pégala aquí.')),
+      h('div', { class: 'row' }, input, save, u.token_configured ? remove : null),
+      h('p', { class: 'tiny muted' }, 'Se guarda cifrada con tu cuenta de Windows en este equipo y solo se usa para descargar las actualizaciones.')));
+}
+
 export async function renderServerPanel(root, ctx) {
   const box = h('div', { class: 'col gap-lg' });
   mount(root, box);
@@ -422,6 +449,7 @@ export async function renderServerPanel(root, ctx) {
       !u.installed ? h('p', { class: 'tiny muted mt' }, 'Las actualizaciones automáticas solo funcionan en el programa instalado en Windows.') : null,
       u.available && !u.can_apply && u.manual_url ? h('p', { class: 'small mt' }, 'Puedes ', h('a', { href: u.manual_url, target: '_blank', rel: 'noopener noreferrer' }, 'descargarla a mano'), '.') : null,
       (u.log_tail || []).length ? h('details', { class: 'notes mt' }, h('summary', null, 'Registro de actualizaciones'), h('div', { class: 'pre tiny mono adm-log' }, u.log_tail.join('\n'))) : null,
+      u.is_host ? githubAccess(u) : h('p', { class: 'tiny muted mt' }, 'Este equipo recibe las actualizaciones del anfitrión por vuestra red privada (no necesita acceso a GitHub). Cada actualización se comprueba con la firma del proyecto antes de instalarse.'),
       h('div', { class: 'row end mt' }, checkBtn, u.available ? applyBtn : null)));
     // Carpetas
     const folders = [['datos', 'Documentos\\DEV CONTROL', 'folder'], ['exportaciones', 'Exportaciones', 'download'], ['copias', 'Copias de seguridad', 'backup'],

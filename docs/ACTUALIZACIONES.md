@@ -2,7 +2,8 @@
 
 ## Reglas
 
-- El programa consulta la última versión publicada en GitHub Releases al abrirse y cada pocas horas.
+- El **anfitrión** consulta la última versión publicada en GitHub Releases al abrirse y cada pocas horas. Los
+  **miembros** no necesitan GitHub: piden la versión al anfitrión por la red privada (ver «Repositorio privado»).
 - **Anfitrión**: si hay una versión nueva, debe instalarla (ventana que no se puede cerrar con «Actualizar ahora»).
 - **Miembros**: deben actualizarse en cuanto el anfitrión tiene una versión más nueva que la suya, o si el servidor
   exige una versión mínima (respuesta HTTP 426). Así nunca hay miembros por delante de un anfitrión sin actualizar.
@@ -14,6 +15,28 @@
   obligatoria aparece al colgar.
 - **Sin Internet nunca se bloquea el trabajo.** Si un miembro debe actualizarse y no puede descargarla, se le ofrece el
   enlace para hacerlo a mano.
+
+## Repositorio privado
+
+El repositorio puede ser privado. Entonces:
+
+1. **Solo el anfitrión** necesita acceso a GitHub, con una **clave de acceso de solo lectura**:
+   - En GitHub: foto de perfil → **Settings → Developer settings → Personal access tokens → Fine-grained tokens →
+     Generate new token**.
+   - *Repository access*: **Only select repositories** → el repositorio de DEV CONTROL.
+   - *Permissions → Repository permissions → Contents*: **Read-only** (nada más).
+   - Elige una caducidad (por ejemplo, 1 año) y copia la clave (`github_pat_…`).
+   - En el anfitrión: **Ajustes → Servidor y actualizaciones → Acceso a GitHub**, pega la clave y pulsa
+     **Guardar clave**. Se guarda cifrada con la cuenta de Windows de ese equipo (no se envía a nadie más).
+2. El anfitrión descarga el manifiesto firmado y el instalador y **los sirve a los demás equipos**
+   (`/api/update/manifest` y `/api/update/installer`). Los miembros siguen comprobando la firma y la huella SHA-256,
+   así que el anfitrión no puede colarles un instalador distinto del publicado.
+3. Si la clave caduca o se revoca, el anfitrión lo indica en Ajustes («GitHub ha rechazado la clave de acceso») y
+   basta con poner una nueva.
+
+Las versiones anteriores a la 2.1.1 solo saben descargar de un repositorio público: con el repositorio privado hay que
+instalar la 2.1.1 a mano **una vez** en cada equipo (descargándola de Releases con una cuenta con acceso). A partir de
+ahí todo se actualiza solo.
 
 ## Seguridad
 

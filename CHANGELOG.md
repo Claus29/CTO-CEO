@@ -2,6 +2,16 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.1.1] - 2026-10-21
+
+- **Actualizaciones con el repositorio privado.** El anfitrión descarga las versiones de GitHub con una clave de acceso
+  de solo lectura (Ajustes → Servidor y actualizaciones → Acceso a GitHub), guardada cifrada con su cuenta de Windows.
+- Los demás equipos reciben la versión **del anfitrión** por la red privada, sin cuenta ni clave de GitHub. Siguen
+  comprobando la firma y la huella del instalador antes de instalarlo.
+- En cuanto el anfitrión tiene una versión más nueva, los miembros la piden al momento; el anfitrión descarga el
+  instalador por adelantado para que esté listo.
+- Mensajes claros si la clave falta, caduca o no tiene permiso.
+
 ## [2.1.0] - 2026-10-21
 
 - **Llamadas de voz y vídeo entre cuentas**, de 2 personas o de grupo (hasta 8), con compartir pantalla. Se llama a

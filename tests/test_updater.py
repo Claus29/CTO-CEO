@@ -1,6 +1,10 @@
 """Actualizaciones: firma obligatoria, reglas de actualización obligatoria, comprobación y vuelta atrás."""
 import base64
+import hashlib
 import json
+import threading
+import urllib.error
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 from conftest import new_incident
@@ -45,11 +49,15 @@ def test_project_public_key_is_valid():
     Ed25519PublicKey.from_public_bytes(base64.b64decode(updater.PUBLIC_KEY_B64))
 
 
-def fake_github(raw, sig):
-    def get(url, timeout=20):
+def fake_github(raw, sig, seen=None, status=None):
+    def get(url, headers=None, timeout=20):
+        if seen is not None:
+            seen.append((url, dict(headers or {})))
+        if status:
+            raise urllib.error.HTTPError(url, status, "x", {}, None)
         if url.endswith("/releases/latest"):
-            return json.dumps({"assets": [{"name": "manifest.json", "browser_download_url": "m"},
-                                          {"name": "manifest.json.sig", "browser_download_url": "s"}]}).encode()
+            return json.dumps({"assets": [{"name": "manifest.json", "url": "m"}, {"name": "manifest.json.sig", "url": "s"},
+                                          {"name": "DEVCONTROL-Setup.exe", "url": "i"}]}).encode()
         return raw if url == "m" else sig.encode()
     return get
 
@@ -88,7 +96,7 @@ def test_bad_signature_never_offers_update(layout, keys):
 
 
 def test_no_internet_never_blocks(layout):
-    def offline(url, timeout=20):
+    def offline(url, headers=None, timeout=20):
         raise OSError("sin red")
     up = updater.Updater(layout, load_config(layout), http_get=offline)
     up.check(force=True)
@@ -130,3 +138,85 @@ def test_update_script_quotes_paths(layout, tmp_path):
     script = updater.build_script(tmp_path / "a'b" / "setup.exe", tmp_path / "Programa", tmp_path / "Anterior", layout, 1234)
     assert "'a''b'" not in script and "a''b" in script
     assert "--verificar-actualizacion" in script and "--revertir-datos" in script and "/ACTUALIZACION=1" in script
+
+
+def test_private_repository_needs_token(layout, keys):
+    cfg = load_config(layout)
+    up = updater.Updater(layout, cfg, hooks={"predownload": False}, http_get=fake_github(b"", "", status=404))
+    up.check(force=True)
+    assert "clave de acceso" in up.status()["error"] and not up.status()["token_configured"]
+    seen = []
+    raw = manifest()
+    up = updater.Updater(layout, cfg, hooks={"predownload": False}, http_get=fake_github(raw, updater.sign_manifest(raw, keys), seen))
+    up.set_token("github_pat_prueba123")
+    assert up.status()["token_configured"] and b"github_pat" not in up.token_file.read_bytes()[:6]
+    up.check(force=True)
+    assert up.status()["available"] and up.installer_url == "i"
+    assert all(h.get("Authorization") == "Bearer github_pat_prueba123" for _, h in seen)
+    # el anfitrión guarda la versión firmada para servírsela a los demás equipos
+    assert (layout.updates_dir / "manifest.json").read_bytes() == raw
+    up.set_token("")
+    assert not up.status()["token_configured"]
+
+
+def test_members_update_from_the_host(layout, keys, admin, server):
+    installer = b"instalador de prueba " * 1000
+    raw = json.dumps({"app": "DEV CONTROL", "version": "9.9.9", "notes": "",
+                      "installer": {"name": "DEVCONTROL-Setup-9.9.9.exe", "url": "https://x/y.exe",
+                                    "sha256": hashlib.sha256(installer).hexdigest(), "size": len(installer)}}).encode()
+    layout.updates_dir.mkdir(parents=True, exist_ok=True)
+    (layout.updates_dir / "manifest.json").write_bytes(raw)
+    (layout.updates_dir / "manifest.json.sig").write_text(updater.sign_manifest(raw, keys))
+    cfg = load_config(layout)
+    cfg.role = "miembro"
+    member_layout = type(layout)(layout.docs_root.parent / "M-docs", layout.local_root.parent / "M-local").ensure()
+    up = updater.Updater(member_layout, cfg, hooks={"server_url": lambda: server.base})
+    # el anfitrión aún no tiene el instalador: aviso claro
+    up.check(force=True)
+    assert up.status()["latest"] == "9.9.9" and up.status()["source"] == "anfitrion"
+    with pytest.raises(updater.UpdateError, match="todavía no tiene el instalador"):
+        up._download(up.latest["installer"])
+    (layout.updates_dir / "DEVCONTROL-Setup-9.9.9.exe").write_bytes(installer)
+    path = up._download(up.latest["installer"], quiet=True)
+    assert path.read_bytes() == installer and path.parent == member_layout.updates_dir
+    # una firma alterada en el anfitrión se rechaza
+    (layout.updates_dir / "manifest.json").write_bytes(raw.replace(b"9.9.9", b"9.9.8"))
+    up.check(force=True)
+    assert up.status()["state"] == "error" and "firma" in up.status()["error"]
+
+
+def test_token_never_sent_to_other_hosts():
+    received = {}
+
+    class Target(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received["auth"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a):
+            pass
+
+    target = HTTPServer(("127.0.0.1", 0), Target)
+    port_b = target.server_address[1]
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received["first_auth"] = self.headers.get("Authorization")
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{port_b}/archivo")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    origin = HTTPServer(("127.0.0.1", 0), Redirect)
+    for srv in (target, origin):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        body = updater._http_get(f"http://127.0.0.1:{origin.server_address[1]}/asset", {"Authorization": "Bearer x"})
+        assert body == b"ok" and received["first_auth"] == "Bearer x" and received["auth"] is None
+    finally:
+        target.shutdown()
+        origin.shutdown()
