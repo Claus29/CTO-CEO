@@ -86,7 +86,7 @@ class Notifier:
         self.in_call = False
         self.route = ""
         self.prefs: dict | None = None
-        self.prefs_at = 0.0
+        self.prefs_at: float | None = None   # None = hay que pedirlas ya
         self.shown: deque = deque(maxlen=200)
         self.wake = threading.Event()
 
@@ -97,7 +97,7 @@ class Notifier:
             self.token, self.user_id, self.server_key = token, user_id, self.agent.server_key
             if not same:
                 self.last_id = self._stored_last_id()
-            self.prefs_at = 0.0          # la interfaz lo vuelve a llamar al guardar las preferencias
+            self.prefs_at = None           # la interfaz lo vuelve a llamar al guardar las preferencias
         self.wake.set()
 
     def clear_session(self) -> None:
@@ -173,7 +173,7 @@ class Notifier:
             token = self.token
         if not token or not self.agent.reachable:
             return []
-        if time.monotonic() - self.prefs_at > PREFS_SECONDS or self.prefs is None:
+        if self.prefs_at is None or self.prefs is None or time.monotonic() - self.prefs_at > PREFS_SECONDS:
             prefs = self._get("/api/notifications/prefs")
             if prefs is not None:
                 self.prefs, self.prefs_at = prefs, time.monotonic()

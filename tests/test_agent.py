@@ -127,11 +127,17 @@ def test_single_instance_check_uses_the_chosen_port(stack, tmp_path):
     assert not App(other, headless=True, port=free_port).other_instance()
 
 
-def test_windows_notices_arrive_with_the_window_closed(stack):
+def test_windows_notices_arrive_with_the_window_closed(stack, monkeypatch):
     """2.2: el programa local avisa por Windows aunque la ventana esté cerrada, sin repetir y respetando preferencias."""
+    import types
+
     from conftest import create_user
 
+    from devcontrol.agent import notifier as notifier_mod
     from devcontrol.agent.notifier import in_quiet_hours, plan
+    # Como en un equipo recién encendido (el reloj monotónico empieza casi en 0), donde falló en GitHub.
+    start = time.monotonic()
+    monkeypatch.setattr(notifier_mod, "time", types.SimpleNamespace(monotonic=lambda: time.monotonic() - start + 5))
     local, agent = stack["local"], stack["agent"]
     shown = []
     agent.hooks["toast"] = lambda title, body, link, urgent, tag: shown.append((title, body, link))
