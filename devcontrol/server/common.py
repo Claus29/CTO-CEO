@@ -92,6 +92,10 @@ NOTIFICATION_PRESETS = {
                  "sla", "dependency_unblocked", "reminder", "account", "system"},
 }
 
+# Descripciones de tareas, incidencias e ideas: hasta 500 000 caracteres (antes 20 000).
+LONG_TEXT_MAX = 500_000
+LIST_PREVIEW_CHARS = 1_000   # en los listados solo viaja el principio (la ficha la trae completa)
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 UID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 MENTION_RE = re.compile(r"(?<![\w.])@([A-Za-z0-9_.-]{2,40})")

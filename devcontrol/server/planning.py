@@ -9,6 +9,8 @@ from datetime import date, timedelta
 from . import auth
 from .common import (
     IDEA_STATUSES,
+    LIST_PREVIEW_CHARS,
+    LONG_TEXT_MAX,
     PRIORITIES,
     TASK_STATUSES,
     VERSION_STATUSES,
@@ -197,7 +199,12 @@ def register(router, app):
 
     @router.route("GET", "/api/tasks", perm="tareas.ver")
     def tasks(req):
-        return {"items": list_tasks(req, req.user)}
+        items = list_tasks(req, req.user)
+        for it in items:   # descripciones muy largas: en el listado solo el principio
+            if len(it.get("description") or "") > LIST_PREVIEW_CHARS:
+                it["description"] = it["description"][:LIST_PREVIEW_CHARS] + "…"
+                it["description_truncated"] = True
+        return {"items": items}
 
     @router.route("GET", "/api/tasks/{tid}", perm="tareas.ver")
     def task_detail(req, tid):
@@ -221,7 +228,7 @@ def register(router, app):
     def task_fields(c, data: dict, partial: bool, project_id: int) -> dict:
         spec = {
             "title": lambda v: clean_text(v, "título", 200, required=True),
-            "description": lambda v: clean_text(v, "descripción", 20000),
+            "description": lambda v: clean_text(v, "descripción", LONG_TEXT_MAX),
             "priority": lambda v: clean_choice(v, "prioridad", PRIORITIES, "media"),
             "target_date": lambda v: clean_date(v, "fecha objetivo"),
             "planned_week": lambda v: monday_of(clean_date(v, "semana prevista")),
@@ -516,7 +523,7 @@ def register(router, app):
     def idea_fields(c, data, partial, project_id):
         spec = {
             "title": lambda v: clean_text(v, "título", 200, required=True),
-            "description": lambda v: clean_text(v, "descripción", 20000),
+            "description": lambda v: clean_text(v, "descripción", LONG_TEXT_MAX),
             "priority": lambda v: clean_choice(v, "prioridad", PRIORITIES, "media"),
             "version_id": lambda v: version_ok(c, v, project_id),
             "status": lambda v: clean_choice(v, "estado", IDEA_STATUSES, "propuesta"),

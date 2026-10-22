@@ -21,6 +21,7 @@ Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 - **Mi cuenta → Avisos**: ajuste rápido (Todo / Lo importante / Solo lo mío), horario de silencio, hora del resumen,
   tipos de aviso por áreas y «Probar un aviso de Windows».
 - «Buscar actualizaciones» en el icono de la bandeja ahora dice siempre el resultado.
+- La **descripción de una tarea** (y la de incidencias e ideas) admite hasta **500 000 caracteres** (antes 20 000).
 
 ## [2.1.1] - 2026-10-21
 

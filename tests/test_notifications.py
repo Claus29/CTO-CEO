@@ -175,3 +175,18 @@ def test_published_version_reaches_the_team_once(admin):
     admin.patch(f"/api/versions/{v['id']}", {"status": "publicada", "version": v["version"]})
     pub = [n for n in notes(marta, type="release") if "publicada" in n["title"]]
     assert len(pub) == 1
+
+
+def test_long_descriptions_up_to_500k(admin):
+    """2.2: las descripciones de tareas e incidencias admiten hasta 500 000 caracteres."""
+    long_text = ("Paso con acentos y ñ: revisar el flujo de pago. " * 11000)[:500_000]
+    t = new_task(admin, description=long_text)
+    full = admin.get(f"/api/tasks/{t['id']}")["item"]
+    assert len(full["description"]) == 500_000
+    listed = next(x for x in admin.get("/api/tasks")["items"] if x["id"] == t["id"])
+    assert listed["description_truncated"] and len(listed["description"]) < 2000     # el listado sigue siendo ligero
+    t = admin.patch(f"/api/tasks/{t['id']}", {"description": long_text[:-1] + "!", "version": t["version"]})["item"]
+    assert admin.get(f"/api/tasks/{t['id']}")["item"]["description"].endswith("!")
+    code, err = admin.call("POST", "/api/tasks", {"uid": uuid.uuid4().hex, "title": "Demasiado", "project_id":
+                                                  project_id(admin), "description": "x" * 500_001})
+    assert code == 400 and "500000" in err["message"]

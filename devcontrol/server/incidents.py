@@ -11,6 +11,8 @@ from .common import (
     ENVIRONMENTS,
     FREQUENCIES,
     INCIDENT_STATUSES,
+    LIST_PREVIEW_CHARS,
+    LONG_TEXT_MAX,
     OPEN_INCIDENT,
     PRIORITIES,
     REPORT_FIELDS,
@@ -38,7 +40,7 @@ from .web import HttpError, Response, bad_request, forbidden
 
 FIELDS = {
     "title": lambda v: clean_text(v, "título", 200, required=True),
-    "description": lambda v: clean_text(v, "descripción", 20000),
+    "description": lambda v: clean_text(v, "descripción", LONG_TEXT_MAX),
     "priority": lambda v: clean_choice(v, "prioridad", PRIORITIES),
     "category": lambda v: clean_choice(v, "categoría", CATEGORIES),
     "steps": lambda v: clean_text(v, "pasos", 10000),
@@ -236,7 +238,12 @@ def register(router, app):
 
     @router.route("GET", "/api/incidents", perm="incidencias.ver")
     def get_list(req):
-        return {"items": list_incidents(req, req.user)}
+        items = list_incidents(req, req.user)
+        for it in items:   # descripciones muy largas: en el listado solo el principio
+            if len(it.get("description") or "") > LIST_PREVIEW_CHARS:
+                it["description"] = it["description"][:LIST_PREVIEW_CHARS] + "…"
+                it["description_truncated"] = True
+        return {"items": items}
 
     @router.route("GET", "/api/incidents/similar", perm="incidencias.ver")
     def similar(req):
