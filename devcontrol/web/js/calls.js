@@ -24,6 +24,7 @@ let lastServerActive = null;
 
 export const callsAvailable = () => can('llamadas.usar') && (store.local?.server_info?.features || []).includes('calls');
 export const inCall = () => !!session;
+window.dcInCall = inCall;   // el programa local no instala actualizaciones durante una llamada
 
 // ---------------------------------------------------------------------------------------------
 // Consulta de eventos (mantiene «vivo» este equipo para la centralita)

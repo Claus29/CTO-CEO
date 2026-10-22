@@ -8,7 +8,7 @@ import {
   h, icon, loading, menuButton, modal, mount, priorityBadge, promptDialog, richText, selectEl, statusBadge, tabs, toast, uid,
 } from '../ui.js';
 import {
-  activityTimeline, attachmentsSection, codeLinksList, commentsSection, dueText, entityPicker, relationsSection, resolutionHistory,
+  activityTimeline, attachmentsSection, codeLinksList, commentsSection, followButton, dueText, entityPicker, relationsSection, resolutionHistory,
   timeWidget, userSelect, verificationPanel,
 } from './shared.js';
 
@@ -214,7 +214,7 @@ export default async function render(ctx) {
           item.overdue ? h('span', { class: 'badge danger' }, 'Vencida') : null,
           item.reopen_count ? h('span', { class: 'badge warn' }, `Reabierta ${item.reopen_count} ${item.reopen_count === 1 ? 'vez' : 'veces'}`) : null,
           (item.labels_list || []).map(l => h('a', { class: 'lbl-chip', href: `#/incidencias?label=${encodeURIComponent(l)}` }, l)))),
-      h('div', { class: 'actions' }, actions, more)));
+      h('div', { class: 'actions' }, followButton('incident', item.id), actions, more)));
   }
 
   function drawAlerts() {

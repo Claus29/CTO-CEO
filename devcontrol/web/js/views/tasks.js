@@ -6,7 +6,7 @@ import {
   avatar, busy, confirmDialog, debounce, emptyState, errorBox, field, fmtDate, fmtHours, h, icon, loadJSON, loading, modal, mondayOf,
   mount, pageHead, priorityBadge, promptDialog, saveJSON, selectEl, statusBadge, table, toast, todayISO, uid, addDays,
 } from '../ui.js';
-import { projectSelect, userSelect } from './shared.js';
+import { followButton, projectSelect, userSelect } from './shared.js';
 
 const VIEW_KEY = 'dc.tasks.view';
 const MODE_KEY = 'dc.tasks.mode';
@@ -357,7 +357,8 @@ export default async function render(ctx) {
   const openNew = (preset) => newTaskModal({ onCreated: () => load(), preset });
   drawMode();
   mount(root,
-    pageHead('Tareas', modeSeg, exportBtn, can('tareas.crear') ? h('button', { class: 'btn primary', onclick: () => openNew() }, icon('plus'), 'Nueva tarea') : null),
+    pageHead('Tareas', modeSeg, store.project !== 'all' ? followButton('project', store.project, { label: 'Seguir el proyecto' }) : null,
+      exportBtn, can('tareas.crear') ? h('button', { class: 'btn primary', onclick: () => openNew() }, icon('plus'), 'Nueva tarea') : null),
     h('div', { class: 'toolbar' }, h('div', { class: 'search' }, icon('search'), search)),
     filtersBox, countBox, body);
   drawFilters();

@@ -14,6 +14,30 @@ import {
   fmtRelative, fmtSize, h, icon, lightbox, mount, modal, promptDialog, richText, statusBadge, toast, todayISO, typeBadge, uid,
 } from '../ui.js';
 
+// ---------- seguir un elemento (avisos de todos sus cambios) ----------
+// entityType: task | incident | idea | wiki | decision | project
+export function followButton(entityType, entityId, { label = 'Seguir', compact = false } = {}) {
+  const btn = h('button', { class: 'btn sm ghost follow-btn', type: 'button' });
+  let state = { following: false, count: 0 };
+  const paint = () => {
+    btn.classList.toggle('on', state.following);
+    btn.title = state.following
+      ? 'Recibes un aviso de cada cambio. Pulsa para dejar de seguir.'
+      : 'Recibe un aviso de cada cambio (estado, responsable, comentarios…).';
+    mount(btn, icon(state.following ? 'bell' : 'eye', 14),
+      compact ? null : (state.following ? 'Siguiendo' : label),
+      state.count ? h('span', { class: 'follow-count' }, String(state.count)) : null);
+  };
+  btn.onclick = () => busy(btn, async () => {
+    state = await api.post('/api/follows', { entity_type: entityType, entity_id: entityId, follow: !state.following });
+    paint();
+    toast(state.following ? 'Te avisaremos de cada cambio.' : 'Ya no sigues este elemento.', 'ok');
+  }).catch(() => {});
+  paint();
+  api.get(`/api/follows?entity_type=${entityType}&entity_id=${entityId}`).then((s) => { state = s; paint(); }).catch(() => {});
+  return btn;
+}
+
 // ---------- acceso a los datos de una ficha ----------
 const DETAIL_PATHS = { incident: 'incidents', task: 'tasks', decision: 'decisions', wiki: 'wiki' };
 export function entityPath(type, id) {

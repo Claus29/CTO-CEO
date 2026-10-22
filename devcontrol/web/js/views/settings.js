@@ -449,6 +449,12 @@ export async function renderServerPanel(root, ctx) {
       !u.installed ? h('p', { class: 'tiny muted mt' }, 'Las actualizaciones automáticas solo funcionan en el programa instalado en Windows.') : null,
       u.available && !u.can_apply && u.manual_url ? h('p', { class: 'small mt' }, 'Puedes ', h('a', { href: u.manual_url, target: '_blank', rel: 'noopener noreferrer' }, 'descargarla a mano'), '.') : null,
       (u.log_tail || []).length ? h('details', { class: 'notes mt' }, h('summary', null, 'Registro de actualizaciones'), h('div', { class: 'pre tiny mono adm-log' }, u.log_tail.join('\n'))) : null,
+      h('p', { class: 'tiny muted mt' }, u.auto
+        ? (u.is_host ? 'Las versiones nuevas se instalan solas: este equipo las busca cada 30 minutos, avisa 2 minutos antes y nunca actualiza durante una llamada. Después se actualiza el resto del equipo.'
+          : 'Las versiones nuevas se instalan solas en cuanto el anfitrión se actualiza (con un aviso de 2 minutos y nunca durante una llamada).')
+        : 'La instalación automática está desactivada en config.ini ([actualizaciones] automaticas = no).'),
+      u.auto_in != null ? h('div', { class: 'callout info small mt' }, `La versión ${u.auto_version} se instalará sola en ${Math.max(1, Math.round(u.auto_in / 60))} min.`) : null,
+      u.auto_blocked ? h('div', { class: 'callout warn small mt' }, u.auto_blocked) : null,
       u.is_host ? githubAccess(u) : h('p', { class: 'tiny muted mt' }, 'Este equipo recibe las actualizaciones del anfitrión por vuestra red privada (no necesita acceso a GitHub). Cada actualización se comprueba con la firma del proyecto antes de instalarse.'),
       h('div', { class: 'row end mt' }, checkBtn, u.available ? applyBtn : null)));
     // Carpetas

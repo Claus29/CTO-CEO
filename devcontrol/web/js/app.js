@@ -5,7 +5,7 @@ import {
   openKey, saveJSON, toast, typeBadge,
 } from './ui.js';
 import {
-  can, canAny, entityHash, loadSession, openNotification, pollLocal, refreshCounters, setProject, startSync, stopSync, store,
+  can, canAny, entityHash, forgetSession, loadSession, openNotification, pollLocal, refreshCounters, setProject, startSync, stopSync, store,
 } from './state.js';
 import { callsAvailable, inCall, openCallsPanel, startCalls, stopCalls } from './calls.js';
 
@@ -372,6 +372,7 @@ function renderUpdate(force) {
     h('div', { class: 'update-icon' }, icon('rocket', 34)),
     h('h2', null, 'Actualización obligatoria'),
     h('p', null, st.reason || 'Hay una versión nueva de DEV CONTROL. Es obligatorio instalarla para seguir trabajando con el equipo.'),
+    autoInfo(st),
     h('div', { class: 'kv' }, h('span', null, 'Versión instalada'), h('b', null, st.current || store.local?.version || '—'),
       h('span', null, 'Versión nueva'), h('b', null, st.latest || st.required || '—')),
     st.notes ? h('details', { class: 'notes' }, h('summary', null, 'Novedades'), h('div', { class: 'pre small' }, st.notes)) : null,
@@ -380,6 +381,18 @@ function renderUpdate(force) {
     st.error ? h('div', { class: 'callout danger' }, st.error) : null,
     h('div', { class: 'small muted' }, 'Tus datos no se tocan: antes de actualizar se hace una copia de seguridad en Documentos\\DEV CONTROL.'),
     h('div', { class: 'row end' }, st.can_apply === false && st.manual_url ? h('a', { class: 'btn', href: st.manual_url, target: '_blank' }, 'Descargar a mano') : null, btn)));
+}
+
+// Instalación automática: cuenta atrás, «Posponer 15 min» y motivo de espera (una llamada, un fallo anterior).
+function autoInfo(u) {
+  if (u?.waiting_reason) return h('div', { class: 'small warn-text' }, u.waiting_reason);
+  if (u?.auto_blocked) return h('div', { class: 'small warn-text' }, u.auto_blocked);
+  if (u?.auto_in == null) return null;
+  const m = Math.floor(u.auto_in / 60), s = String(u.auto_in % 60).padStart(2, '0');
+  const later = h('button', { class: 'btn ghost sm', onclick: () => busy(later, () => api.local('POST', '/local/update/postpone', { minutes: 15 }),
+    'La actualización se instalará dentro de 15 minutos.').then(pollLocal).catch(() => {}) }, 'Posponer 15 min');
+  return h('span', { class: 'row', style: { gap: '8px' } },
+    h('span', { class: 'small' }, 'Se instalará sola en ', h('span', { class: 'update-countdown' }, `${m}:${s}`)), later);
 }
 
 // Franja permanente: si hay una versión más nueva, siempre se avisa de que este programa está obsoleto.
@@ -403,9 +416,10 @@ function renderObsolete(u, mandatory) {
   mount(el, icon('alert', 16),
     h('div', { class: 'grow' }, h('b', null, `Tu versión de DEV CONTROL (${u.current}) está obsoleta.`), ' ',
       latest ? `Hay una versión nueva (${latest}). ` : '',
-      mandatory && inCall() ? 'La actualización es obligatoria y se pedirá al terminar la llamada.' :
-        mandatory ? 'Es obligatorio actualizar.' : 'Actualiza para tener las últimas mejoras y correcciones.'),
-    action, h('button', { class: 'btn ghost sm', title: 'Minimizar (volverá a aparecer al abrir el programa)', onclick: () => { obsoleteMinimized = true; renderUpdate(); } }, 'Minimizar'));
+      mandatory && inCall() ? 'La actualización es obligatoria y se instalará al terminar la llamada.' :
+        u.auto_in != null ? 'DEV CONTROL se actualizará solo: se cerrará un momento y volverá a abrirse.' :
+          mandatory ? 'Es obligatorio actualizar.' : 'Actualiza para tener las últimas mejoras y correcciones.'),
+    autoInfo(u), action, h('button', { class: 'btn ghost sm', title: 'Minimizar (volverá a aparecer al abrir el programa)', onclick: () => { obsoleteMinimized = true; renderUpdate(); } }, 'Minimizar'));
 }
 
 on('update-required', () => { pollLocal().then(() => renderUpdate(true)); });
@@ -605,6 +619,7 @@ async function showGate() {
 }
 
 async function logout(changeServer) {
+  await forgetSession();
   stopCalls();
   try { await api.post('/api/logout'); } catch { /* sin conexión */ }
   api.setToken(null);

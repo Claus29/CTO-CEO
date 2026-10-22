@@ -102,6 +102,9 @@ jobs:
           Stop-Process -Id $p.Id -Force
           if (-not $ok) { Get-ChildItem -Recurse "$env:DEVCONTROL_HOME" | Out-String | Write-Host; throw "El ejecutable no ha arrancado" }
           Write-Host "El ejecutable arranca y responde."
+      - name: Avisos nativos de Windows (WinRT desde PowerShell)
+        run: |
+          python -c "from devcontrol.toast import show_toast; import sys; ok = show_toast('Prueba', 'Aviso de DEV CONTROL', 'devcontrol://aviso/1', True, 'ci', dry=True); print('Aviso preparado:', ok); sys.exit(0 if ok else 1)"
       - uses: actions/upload-artifact@v4
         with:
           name: instalador-windows

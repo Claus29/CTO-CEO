@@ -62,9 +62,12 @@ servidor = {servidor}
 puerto_local = {puerto_local}
 
 [actualizaciones]
-; Repositorio público de GitHub del que se descargan las actualizaciones.
+; Repositorio de GitHub del que el anfitrión descarga las actualizaciones (los demás equipos las reciben de él).
 repositorio = {repo}
-comprobar_cada_horas = 4
+; Cada cuántos minutos se busca una versión nueva (mínimo 10).
+comprobar_cada_minutos = 30
+; si = las versiones nuevas se instalan solas (con un aviso de 2 minutos y nunca durante una llamada).
+automaticas = si
 
 [escritorio]
 iniciar_con_windows = {autostart}
@@ -125,7 +128,8 @@ class Config:
     default_server: str = ""
     local_port: int = DEFAULT_LOCAL_PORT
     update_repo: str = DEFAULT_REPOSITORY
-    update_every_hours: int = 4
+    update_every_minutes: int = 30
+    auto_update: bool = True
     autostart: bool = True
     minimize_on_close: bool = True
     # IP propias del anfitrión (las que recibe el servidor de sí mismo)
@@ -282,7 +286,8 @@ def load_config(layout: Layout | None = None, path: Path | None = None) -> Confi
         parse_server_address(cfg.default_server, cfg.server_port)
     cfg.local_port = get_int("cliente", "puerto_local", DEFAULT_LOCAL_PORT)
     cfg.update_repo = get("actualizaciones", "repositorio", DEFAULT_REPOSITORY) or DEFAULT_REPOSITORY
-    cfg.update_every_hours = max(1, get_int("actualizaciones", "comprobar_cada_horas", 4))
+    cfg.update_every_minutes = max(10, get_int("actualizaciones", "comprobar_cada_minutos", 30))
+    cfg.auto_update = _yes(get("actualizaciones", "automaticas", "si"))
     cfg.autostart = _yes(get("escritorio", "iniciar_con_windows", "si"))
     cfg.minimize_on_close = _yes(get("escritorio", "minimizar_al_cerrar", "si"))
     for port, label in ((cfg.server_port, "[servidor] puerto"), (cfg.local_port, "[cliente] puerto_local")):

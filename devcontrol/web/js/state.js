@@ -103,13 +103,52 @@ export function startSync() {
   running = true;
   pollLocal();
   localTimer = setInterval(pollLocal, 2500);
+  shareSession();
+  presenceTimer = setInterval(sendPresence, 5000);
+  sendPresence();
   syncLoop();
 }
 
 export function stopSync() {
   running = false;
   clearInterval(localTimer);
+  clearInterval(presenceTimer);
   loopAbort && loopAbort.abort();
+}
+
+// -- avisos de Windows en segundo plano ----------------------------------------------------------
+// El programa de este equipo recibe la sesión para avisar aunque la ventana esté cerrada en la bandeja,
+// y sabe si la ventana está delante (entonces el aviso se ve dentro) o si hay una llamada (no se actualiza).
+let presenceTimer = null;
+
+export function shareSession() {
+  if (!api.token || !store.me) return;
+  api.local('POST', '/local/session', { token: api.token, user_id: store.me.id }).catch(() => {});
+}
+
+export function forgetSession() {
+  return api.local('POST', '/local/session', { token: '' }).catch(() => {});
+}
+
+export async function sendPresence() {
+  if (!running) return;
+  try {
+    const r = await api.local('POST', '/local/presence', {
+      focused: document.hasFocus() && !document.hidden, in_call: !!window.dcInCall?.(), route: location.hash,
+    });
+    if (r?.open?.startsWith('aviso/')) openNotificationById(Number(r.open.split('/')[1]));
+  } catch { /* el programa local no responde: se reintenta en la siguiente ronda */ }
+}
+window.dcCheckOpen = sendPresence;
+for (const ev of ['focus', 'blur']) window.addEventListener(ev, () => sendPresence());
+document.addEventListener('visibilitychange', () => sendPresence());
+
+export async function openNotificationById(id) {
+  if (!id) return;
+  try {
+    const n = await api.get(`/api/notifications/${id}`);
+    if (n?.item) openNotification(n.item);
+  } catch { /* el aviso ya no existe */ }
 }
 
 export async function pollLocal() {
@@ -207,7 +246,10 @@ async function pullNotifications() {
     const go = () => openNotification(n);
     if (n.urgent && !muted()) beep();
     toast(n.body || '', n.urgent ? 'urgent' : 'info', { title: n.title, onClick: go, sticky: !!n.urgent, timeout: 6000 });
-    if (!muted() && wantsDesktop(n.type) && (document.hidden || !document.hasFocus())) desktopNotify(n, go);
+    // Con el programa de Windows, los avisos del sistema los muestra él (también con la ventana cerrada).
+    if (!store.local?.notifier?.active && !muted() && wantsDesktop(n.type) && (document.hidden || !document.hasFocus())) {
+      desktopNotify(n, go);
+    }
   }
 }
 
@@ -238,6 +280,13 @@ export function entityHash(type, id, key) {
     case 'store_submission': return '#/tiendas';
     case 'version': return '#/versiones';
     case 'standup': return '#/equipo/daily';
+    case 'date': return '#/calendario';
+    case 'absence': return '#/equipo';
+    case 'build': return '#/builds';
+    case 'test_run': return '#/pruebas';
+    case 'goal': return '#/semana';
+    case 'user': return '#/cuenta';
+    case 'project': return '#/tareas';
     default: return '#/panel';
   }
 }

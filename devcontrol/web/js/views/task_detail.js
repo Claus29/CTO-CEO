@@ -8,7 +8,7 @@ import {
   menuButton, modal, mondayOf, mount, priorityBadge, richText, selectEl, statusBadge, tabs, toast,
 } from '../ui.js';
 import {
-  activityTimeline, attachmentsSection, codeLinksList, commentsSection, relationsSection, resolutionHistory, timeWidget, userSelect,
+  activityTimeline, attachmentsSection, codeLinksList, commentsSection, followButton, relationsSection, resolutionHistory, timeWidget, userSelect,
   verificationPanel,
 } from './shared.js';
 import { changeTaskStatus, loadVersions, recurrenceControl, recurrenceText } from './tasks.js';
@@ -102,7 +102,7 @@ export default async function render(ctx) {
           item.version_name ? h('span', { class: 'badge info' }, item.version_name) : null,
           item.recurrence ? h('span', { class: 'badge neutral', title: 'Tarea que se repite' }, icon('repeat', 12), recurrenceText(item.recurrence)) : null,
           (item.labels_list || []).map(l => h('a', { class: 'lbl-chip', href: `#/tareas?label=${encodeURIComponent(l)}` }, l)))),
-      h('div', { class: 'actions' }, actions, more)));
+      h('div', { class: 'actions' }, followButton('task', item.id), actions, more)));
   }
 
   function blockReasonDialog() {

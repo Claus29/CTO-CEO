@@ -2,7 +2,7 @@
 
 ## Reglas
 
-- El **anfitrión** consulta la última versión publicada en GitHub Releases al abrirse y cada pocas horas. Los
+- El **anfitrión** consulta la última versión publicada en GitHub Releases al abrirse y cada 30 minutos. Los
   **miembros** no necesitan GitHub: piden la versión al anfitrión por la red privada (ver «Repositorio privado»).
 - **Anfitrión**: si hay una versión nueva, debe instalarla (ventana que no se puede cerrar con «Actualizar ahora»).
 - **Miembros**: deben actualizarse en cuanto el anfitrión tiene una versión más nueva que la suya, o si el servidor
@@ -15,6 +15,23 @@
   obligatoria aparece al colgar.
 - **Sin Internet nunca se bloquea el trabajo.** Si un miembro debe actualizarse y no puede descargarla, se le ofrece el
   enlace para hacerlo a mano.
+
+## Instalación automática (desde la 2.2)
+
+Cada vez que se publica una versión nueva en GitHub, **todos los equipos se actualizan solos**:
+
+1. El anfitrión la detecta (busca cada 30 minutos; «Buscar actualizaciones» lo hace al momento) y la descarga.
+2. Avisa con un aviso de Windows y una cuenta atrás de **2 minutos** en la ventana, con **«Actualizar ahora»** y
+   **«Posponer 15 min»**.
+3. Se instala sola: copia de seguridad, instalación, comprobación de datos y vuelta a abrir el programa.
+4. En cuanto el anfitrión tiene la versión nueva, cada miembro la recibe de él y hace lo mismo.
+
+Nunca se instala **durante una llamada** (ni en el equipo ni, en el anfitrión, si hay llamadas en curso): espera a que
+termine. Si una versión falla y se vuelve atrás, **no se reintenta sola** en 12 horas (se puede pulsar «Actualizar
+ahora»). Para desactivarlo en un equipo: `[actualizaciones] automaticas = no` en `config.ini` (solo avisará).
+
+Las versiones anteriores a la 2.2 no saben instalarse solas: el paso de la 2.1.x a la 2.2 se hace con
+«Actualizar ahora» (la ventana obligatoria ya lo pide). Desde la 2.2, todo es automático.
 
 ## Repositorio privado
 

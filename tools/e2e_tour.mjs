@@ -14,7 +14,7 @@ const ROUTES = ['panel', 'incidencias', 'incidencias/nueva', 'incidencias/INC-00
   'semana', 'versiones', 'roadmap', 'calendario', 'renovaciones', 'builds', 'pruebas', 'tiendas', 'chat', 'equipo',
   'equipo/carga', 'equipo/ausencias', 'equipo/daily', 'equipo/tiempo', 'wiki', 'decisiones', 'boveda', 'informes',
   'actividad', 'avisos', 'admin', 'admin/roles', 'admin/proyectos', 'admin/bienvenida', 'ajustes', 'ajustes/sla',
-  'ajustes/copias', 'cuenta', 'cuenta/primeros-pasos'];
+  'ajustes/copias', 'cuenta', 'cuenta/avisos', 'cuenta/primeros-pasos'];
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
 const errors = [];

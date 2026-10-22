@@ -125,3 +125,53 @@ def test_single_instance_check_uses_the_chosen_port(stack, tmp_path):
         s.bind(("127.0.0.1", 0))
         free_port = s.getsockname()[1]
     assert not App(other, headless=True, port=free_port).other_instance()
+
+
+def test_windows_notices_arrive_with_the_window_closed(stack):
+    """2.2: el programa local avisa por Windows aunque la ventana esté cerrada, sin repetir y respetando preferencias."""
+    from conftest import create_user
+
+    from devcontrol.agent.notifier import in_quiet_hours, plan
+    local, agent = stack["local"], stack["agent"]
+    shown = []
+    agent.hooks["toast"] = lambda title, body, link, urgent, tag: shown.append((title, body, link))
+    pid = local.get("/api/me")["projects"][0]["id"]
+    luis = create_user(local, "luis", "dev", project_ids=[pid])
+    luis.base = local.base
+    me = local.get("/api/me")["user"]["id"]
+    local.post("/local/session", {"token": local.token, "user_id": me})
+    assert local.get("/local/status")["notifier"]["active"]
+    agent.notifier.poll_once()                 # primera vez: empieza desde ahora, sin avisos antiguos
+    assert shown == []
+    t = luis.post("/api/tasks", {"uid": uuid.uuid4().hex, "title": "Revisar el login", "project_id": pid})["item"]
+    agent.notifier.poll_once()
+    assert len(shown) == 1 and t["key"] in shown[0][0] and shown[0][2].startswith("devcontrol://aviso/")
+    agent.notifier.poll_once()
+    assert len(shown) == 1                     # nunca dos veces el mismo
+    # con la ventana delante no sale el aviso de Windows (se ve dentro del programa)
+    local.post("/local/presence", {"focused": True})
+    luis.post("/api/tasks", {"uid": uuid.uuid4().hex, "title": "Otra", "project_id": pid})
+    agent.notifier.poll_once()
+    assert len(shown) == 1
+    local.post("/local/presence", {"focused": False})
+    # sin «Aviso de Windows» para ese tipo, tampoco
+    local.ok("PUT", "/api/notifications/prefs", {"items": [{"type": "task_created", "in_app": True, "desktop": False}]})
+    local.post("/local/session", {"token": local.token, "user_id": me})   # como hace la interfaz al guardar
+    luis.post("/api/tasks", {"uid": uuid.uuid4().hex, "title": "Tercera", "project_id": pid})
+    agent.notifier.poll_once()
+    assert len(shown) == 1
+    # pulsar el aviso abre ese aviso en la interfaz
+    agent.request_open("aviso/7")
+    assert local.post("/local/presence", {"focused": True})["open"] == "aviso/7"
+    agent.request_open("../../etc")
+    assert local.post("/local/presence", {"focused": True})["open"] == ""
+    # cerrar sesión deja de avisar
+    local.post("/local/session", {"token": ""})
+    assert not local.get("/local/status")["notifier"]["active"]
+    # agrupación del chat y horario de silencio
+    msgs = [{"id": i, "type": "message_new", "title": "Luis en #general", "body": f"m{i}"} for i in (1, 2, 3)]
+    assert [x["title"] for x in plan(msgs)] == ["3 mensajes nuevos en #general"]
+    many = [{"id": i, "type": "comment", "title": f"Aviso {i}", "body": ""} for i in range(10)]
+    assert len(plan(many)) == 4 and plan(many)[-1]["title"] == "7 avisos nuevos más"
+    assert in_quiet_hours("23:30", "22:00", "07:30") and in_quiet_hours("06:00", "22:00", "07:30")
+    assert not in_quiet_hours("12:00", "22:00", "07:30") and not in_quiet_hours("12:00", None, None)

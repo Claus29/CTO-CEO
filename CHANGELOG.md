@@ -2,6 +2,26 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.2.0] - 2026-10-23
+
+- **Las actualizaciones se instalan solas.** Cuando se publica una versión nueva, el anfitrión la detecta (busca cada
+  30 minutos), avisa 2 minutos antes («Actualizar ahora» o «Posponer 15 min») y se instala sola; después, el resto de
+  equipos se actualiza desde el anfitrión de la misma forma. Nunca durante una llamada, siempre con copia previa y vuelta
+  atrás automática si algo falla (y sin reintentar sola una versión que ha fallado).
+- **Avisos de Windows de verdad**: salen aunque la ventana esté cerrada en la bandeja, se quedan en el Centro de
+  actividades y al pulsarlos se abre lo que ha cambiado. Nunca se repiten ni te avisan de lo que haces tú.
+- **Tareas**: aviso al crear una tarea en tus proyectos y en cada edición o cambio de estado (pendiente, en curso,
+  bloqueada, en verificación, resuelta, reabierta), con quién lo hizo y qué cambió. Las ediciones seguidas se juntan.
+- **Seguir** tareas, incidencias, páginas de la wiki o un proyecto entero para enterarte de todo.
+- **Chat**: avisos con quién escribe y en qué canal, respuestas a tus mensajes, agrupados por canal y modo por canal
+  (todos, solo menciones y respuestas, silenciado).
+- **Tus pendientes** cada mañana y recordatorio de lo que lleva más de un día esperando tu verificación.
+- Avisos nuevos en ideas, versiones (publicada o en riesgo), objetivos, builds y pruebas, wiki y decisiones, ausencias,
+  calendario, cuenta (rol, proyectos, inicio de sesión desde un equipo nuevo) y servidor (copias, disco).
+- **Mi cuenta → Avisos**: ajuste rápido (Todo / Lo importante / Solo lo mío), horario de silencio, hora del resumen,
+  tipos de aviso por áreas y «Probar un aviso de Windows».
+- «Buscar actualizaciones» en el icono de la bandeja ahora dice siempre el resultado.
+
 ## [2.1.1] - 2026-10-21
 
 - **Actualizaciones con el repositorio privado.** El anfitrión descarga las versiones de GitHub con una clave de acceso

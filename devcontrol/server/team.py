@@ -76,6 +76,18 @@ def register(router, app):
         c.executemany("INSERT OR IGNORE INTO project_members(project_id, user_id) VALUES (?,?)",
                       [(p, user_id) for p in ids if p in existing])
 
+    def member_projects(c, user_id) -> set[int]:
+        return {r[0] for r in c.execute("SELECT project_id FROM project_members WHERE user_id=?", (user_id,))}
+
+    def announce_projects(c, me, user_ids, project_ids) -> None:
+        """Aviso a quien entra en un proyecto (y empieza a seguirlo)."""
+        for pid in project_ids:
+            prow = c.execute("SELECT name, key FROM projects WHERE id=?", (pid,)).fetchone()
+            if prow:
+                notify(db, c, user_ids, "account", f"Te han añadido al proyecto {prow['name']}",
+                       f"{me['display_name']} te ha añadido a {prow['key']}: ya ves sus tareas, incidencias y canal.",
+                       f"project-added-{pid}-{now_iso()}", "project", pid, exclude=me["id"])
+
     def role_ok(c, role_id) -> int:
         rid = clean_int(role_id, "rol")
         if not c.execute("SELECT 1 FROM roles WHERE id=?", (rid,)).fetchone():
@@ -162,8 +174,15 @@ def register(router, app):
                         c.execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
                         app.presence.drop(row["id"])
             if "project_ids" in data:
+                before = member_projects(c, row["id"])
                 set_projects(c, row["id"], data["project_ids"])
                 notes.append("proyectos")
+                announce_projects(c, me, [row["id"]], member_projects(c, row["id"]) - before)
+            if "role_id=?" in sets:
+                rname = c.execute("SELECT name FROM roles WHERE id=?", (vals[sets.index("role_id=?")],)).fetchone()[0]
+                notify(db, c, [row["id"]], "account", "Tu rol ha cambiado",
+                       f"{me['display_name']} te ha puesto el rol «{rname}». Puede que veas opciones nuevas.",
+                       f"role-{row['id']}-{now_iso()}", "user", row["id"], exclude=me["id"])
             if sets:
                 c.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", vals + [row["id"]])
             log_activity(db, c, me, "user", row["id"], row["username"], "edited",
@@ -401,10 +420,15 @@ def register(router, app):
                           vals + [now_iso(), row["id"]])
             if "member_ids" in data:
                 members = {clean_int(m, "miembro") for m in data["member_ids"] or []}
+                before = {r[0] for r in c.execute("SELECT user_id FROM project_members WHERE project_id=?",
+                                                  (row["id"],))}
                 c.execute("DELETE FROM project_members WHERE project_id=?", (row["id"],))
                 c.executemany("INSERT OR IGNORE INTO project_members(project_id, user_id) VALUES (?,?)",
                               [(row["id"], m) for m in members if c.execute("SELECT 1 FROM users WHERE id=?",
                                                                             (m,)).fetchone()])
+                added = {r[0] for r in c.execute("SELECT user_id FROM project_members WHERE project_id=?",
+                                                 (row["id"],))} - before
+                announce_projects(c, req.user, sorted(added), [row["id"]])
                 db.emit(c, "permissions")
             if data.get("make_default"):
                 db.set_meta(c, "default_project", str(row["id"]))

@@ -656,3 +656,11 @@ kbd { font: 11px "Cascadia Mono", Consolas, monospace; border: 1px solid var(--b
 .obsolete-banner b { color: var(--warn); }
 .obsolete-banner.min { padding: 3px 22px; }
 @media (max-width: 1000px) { .call-panel.expanded { left: 12px; right: 12px; top: 64px; bottom: 12px; } .call-panel { width: calc(100vw - 24px); right: 12px; } }
+
+/* 2.2 · avisos: seguir, preferencias por áreas y cuenta atrás de la actualización automática */
+.follow-btn.on { color: var(--accent); border-color: var(--accent); }
+.follow-count { margin-left: 4px; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--bg-3, rgba(127,127,127,.18)); }
+.adm-group th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: 16px; }
+.adm-time { width: 130px; flex: none; }
+input.adm-time { width: 130px; }
+.update-countdown { font-variant-numeric: tabular-nums; font-weight: 600; }

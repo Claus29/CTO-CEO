@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import APP_NAME, APP_VERSION, parse_version
@@ -47,6 +47,9 @@ STATE_LABELS = {
     "applying": "Instalando. DEV CONTROL se cerrará y volverá a abrirse solo.", "error": "Error",
 }
 TABLES_TO_CHECK = ("users", "projects", "incidents", "tasks", "messages", "attachments", "activity")
+AUTO_DELAY = 120              # aviso antes de instalar sola una versión nueva (segundos)
+AUTO_RETRY_BLOCK_HOURS = 12   # una versión que falló y se revirtió no se reintenta sola en este tiempo
+MEMBER_CHECK_SECONDS = 600    # los miembros preguntan al anfitrión (red local) cada 10 minutos
 
 
 class UpdateError(Exception):
@@ -155,6 +158,11 @@ class Updater:
         self.source: str | None = None           # "github" o "anfitrion"
         self.installer_url: str | None = None
         self.last_server_check = 0.0
+        # Instalación automática: hora prevista, versión y motivo de espera (por ejemplo, una llamada en curso).
+        self.auto_at: float | None = None
+        self.auto_version: str | None = None
+        self.waiting_reason = ""
+        self._predownload_lock = threading.Lock()
 
     # -- clave de acceso a GitHub (repositorio privado) -----------------------------------------
     @property
@@ -242,12 +250,18 @@ class Updater:
                 "required": (self.required or {}).get("min_version") or self.server_version,
                 "available": is_newer(latest.get("version"), APP_VERSION), "mandatory": mandatory, "reason": reason,
                 "notes": latest.get("notes", ""), "published_at": latest.get("published_at"),
-                "can_apply": bool(target_ok and getattr(sys, "frozen", False) and os.name == "nt"),
+                "can_apply": bool(target_ok and self.installable()),
                 "installed": bool(getattr(sys, "frozen", False)), "manual_url": self.manual_url,
                 "last_check": datetime.fromtimestamp(self.last_check).isoformat() if self.last_check else None,
                 "last_update": marker if marker and marker.get("result") and not marker.get("shown") else None,
                 "source": self.source or ("github" if self.cfg.is_host else "anfitrion"),
                 "token_configured": bool(self.get_token()), "is_host": bool(self.cfg.is_host),
+                "auto": bool(getattr(self.cfg, "auto_update", True)),
+                "auto_in": max(0, int(self.auto_at - time.time())) if self.auto_at else None,
+                "auto_version": self.auto_version if self.auto_at else None,
+                "waiting_reason": self.waiting_reason,
+                "auto_blocked": self.auto_blocked(latest.get("version")) if is_newer(latest.get("version"),
+                                                                                      APP_VERSION) else "",
                 "log_tail": self.log_tail(),
             }
 
@@ -267,7 +281,7 @@ class Updater:
         with self.lock:
             if self.state in ("downloading", "verifying", "preparing", "applying"):
                 return self.latest
-            if not force and time.time() - self.last_check < self.cfg.update_every_hours * 3600:
+            if not force and time.time() - self.last_check < self._interval():
                 return self.latest
             self.state, self.error = "checking", ""
         try:
@@ -281,6 +295,7 @@ class Updater:
                 self.state = "idle"
             if manifest is not None and source == "github":
                 self._store_for_members(raw, sig)
+            self._schedule_auto()
         except urllib.error.HTTPError as exc:
             with self.lock:
                 self.state, self.error = "idle", self._http_error(exc)
@@ -293,6 +308,74 @@ class Updater:
         finally:
             self.last_check = time.time()
         return self.latest
+
+    @staticmethod
+    def installable() -> bool:
+        """Solo el programa instalado en Windows puede instalar versiones nuevas por sí mismo."""
+        return bool(getattr(sys, "frozen", False)) and os.name == "nt"
+
+    def _interval(self) -> float:
+        if self.cfg.is_host or not self.server_url():
+            return getattr(self.cfg, "update_every_minutes", 30) * 60
+        return MEMBER_CHECK_SECONDS
+
+    # -- instalación automática ------------------------------------------------------------
+    def auto_blocked(self, version: str | None) -> str:
+        """Si esa versión ya falló hace poco (y se volvió atrás), no se reintenta sola."""
+        marker = read_marker(self.layout) or {}
+        if version and marker.get("to") == version and marker.get("result") in ("fallo", "revertida"):
+            try:
+                when = datetime.fromisoformat(marker.get("finished_at") or "")
+            except ValueError:
+                when = datetime.now()
+            if datetime.now() - when < timedelta(hours=AUTO_RETRY_BLOCK_HOURS):
+                return (f"La instalación automática de la {version} falló y se volvió a la versión anterior. "
+                        "Revisa el registro o pulsa «Actualizar ahora» para intentarlo de nuevo.")
+        return ""
+
+    def _schedule_auto(self) -> None:
+        if not getattr(self.cfg, "auto_update", True):
+            return
+        st = self.status()
+        if not st["can_apply"] or self.auto_blocked(st["latest"]):
+            return
+        with self.lock:
+            if self.state not in ("idle", "error") or (self.auto_at and self.auto_version == st["latest"]):
+                return
+            self.auto_at, self.auto_version = time.time() + AUTO_DELAY, st["latest"]
+        write_log(self.layout, f"Versión {st['latest']} disponible: se instalará sola en {AUTO_DELAY // 60} minutos.")
+        if "auto_scheduled" in self.hooks:
+            self.hooks["auto_scheduled"](st["latest"], AUTO_DELAY)
+        # Se descarga ya, para que la instalación sea inmediata cuando llegue la hora.
+        if self.latest and self.hooks.get("predownload", True):
+            threading.Thread(target=self._predownload, daemon=True).start()
+
+    def postpone(self, minutes: int = 15) -> None:
+        with self.lock:
+            if self.auto_at:
+                self.auto_at = max(self.auto_at, time.time() + max(1, min(minutes, 60)) * 60)
+
+    def tick_auto(self) -> None:
+        """Llamado cada pocos segundos: instala cuando llega la hora y no hay nada que lo impida."""
+        with self.lock:
+            if self.auto_at is None or time.time() < self.auto_at or self.state not in ("idle", "error"):
+                return
+        busy = self.hooks.get("busy")
+        reason = busy() if busy else None
+        if reason:
+            with self.lock:
+                self.waiting_reason = reason
+                self.auto_at = time.time() + 30
+            return
+        with self.lock:
+            self.waiting_reason = ""
+            self.auto_at = None
+        try:
+            write_log(self.layout, f"Instalación automática de la versión {self.auto_version}.")
+            self.apply()
+        except RuntimeError as exc:
+            with self.lock:
+                self.error = str(exc)
 
     def _http_error(self, exc) -> str:
         if exc.code in (401, 403):
@@ -341,16 +424,21 @@ class Updater:
             threading.Thread(target=self._predownload, daemon=True).start()
 
     def _predownload(self) -> None:
+        if not self._predownload_lock.acquire(blocking=False):
+            return                       # ya hay una descarga por adelantado en curso
         try:
             self._download(self.latest["installer"], quiet=True)
         except Exception as exc:
             write_log(self.layout, f"No se pudo descargar por adelantado la versión {self.latest.get('version')}: {exc}")
+        finally:
+            self._predownload_lock.release()
 
     def loop(self) -> None:
         self.stop_event.wait(5)
         while not self.stop_event.is_set():
-            self.check()
-            self.stop_event.wait(600)
+            self.check()          # solo consulta de verdad cuando toca (cada 30 min el anfitrión, 10 los miembros)
+            self.tick_auto()
+            self.stop_event.wait(5)
 
     # -- aplicar ---------------------------------------------------------------------
     def apply(self) -> None:

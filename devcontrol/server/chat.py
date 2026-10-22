@@ -195,8 +195,9 @@ def register(router, app):
                   (user_id, channel_id, last_id))
         if ids:
             marks = ",".join("?" * len(ids))
-            c.execute(f"UPDATE notifications SET read_at=? WHERE user_id=? AND type IN ('message_new','mention') AND "
-                      f"entity_type='message' AND read_at IS NULL AND entity_id IN ({marks})", [ts, user_id] + ids)
+            c.execute(f"UPDATE notifications SET read_at=? WHERE user_id=? AND type IN ('message_new','mention',"
+                      f"'chat_reply') AND entity_type='message' AND read_at IS NULL AND entity_id IN ({marks})",
+                      [ts, user_id] + ids)
             db.emit(c, "chat_read", "message", last_id, actor_id=user_id)
             db.emit(c, "notification", None, None, user_id=user_id)
 
@@ -229,8 +230,19 @@ def register(router, app):
             mentioned = mentioned_users(c, body)
             notify(db, c, mentioned, "mention", f"{user['display_name']} te ha mencionado en {label}", preview,
                    f"mention-msg-{mid}", "message", mid, exclude=user["id"], urgent=True)
-            recipients = channel_audience(c, ch)
-            notify(db, c, [u for u in recipients if u not in mentioned], "message_new",
+            # Cada persona elige por canal: todos los mensajes, solo menciones y respuestas, o silenciado.
+            modes = {r[0]: r[1] for r in c.execute("SELECT user_id, mode FROM channel_prefs WHERE channel_id=?",
+                                                   (ch["id"],))}
+            replied = None
+            if reply_to:
+                author = c.execute("SELECT user_id FROM messages WHERE id=?", (reply_to,)).fetchone()[0]
+                if author != user["id"] and author not in mentioned and modes.get(author) != "silencio":
+                    replied = author
+                    notify(db, c, [author], "chat_reply", f"{user['display_name']} ha respondido a tu mensaje en {label}",
+                           preview, f"reply-msg-{mid}", "message", mid, exclude=user["id"])
+            recipients = [u for u in channel_audience(c, ch)
+                          if u not in mentioned and u != replied and modes.get(u, "todo") == "todo"]
+            notify(db, c, recipients, "message_new",
                    f"{user['display_name']} en {label}", preview, f"msg-{mid}", "message", mid, exclude=user["id"])
             db.index(c, "message", mid, ch["project_id"], "", "", body)
             db.emit(c, "message", "message", mid, actor_id=user["id"])

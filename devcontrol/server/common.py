@@ -1,7 +1,9 @@
 """Constantes, validaciones, proyectos visibles, registro de actividad y notificaciones."""
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import re
 import sqlite3
 from datetime import date
@@ -53,6 +55,41 @@ NOTIFICATION_TYPES = {
     "standup": "Daily y bloqueos declarados", "reminder": "Recordatorios",
     "call_incoming": "Llamadas entrantes", "call_missed": "Llamadas perdidas",
     "daily_summary": "Resumen diario", "weekly_summary": "Resumen semanal", "system": "Sistema y seguridad",
+    # 2.2
+    "task_created": "Tareas nuevas en tus proyectos", "task_updated": "Cambios en tareas tuyas o que sigues",
+    "incident_updated": "Cambios en incidencias tuyas o que sigues",
+    "status_changed": "Cambios de estado (en curso, en verificación, resuelta, reabierta…)",
+    "chat_reply": "Respuestas a tus mensajes", "pending_digest": "Tus pendientes (cada mañana)",
+    "verify_waiting": "Verificaciones que llevan más de un día esperando",
+    "idea": "Ideas nuevas y cambios en tus ideas", "release": "Versiones y objetivos del equipo",
+    "quality": "Builds nuevas y pruebas", "wiki": "Wiki y decisiones", "team_absence": "Ausencias del equipo",
+    "calendar": "Fechas del calendario", "account": "Tu cuenta y tus proyectos",
+    "server_health": "Estado del servidor (copias y espacio en disco)",
+}
+
+# Agrupación para la pantalla de preferencias.
+NOTIFICATION_AREAS = {
+    "Tareas e incidencias": ["task_created", "task_updated", "status_changed", "assigned", "verify_request",
+                             "verified", "rejected", "verify_waiting", "incident_created", "incident_critical",
+                             "incident_updated", "incident_reopened", "incident_seen", "incident_blocked",
+                             "dependency_unblocked", "comment", "mention"],
+    "Pendientes y plazos": ["pending_digest", "due_soon", "sla", "incident_stale", "reminder"],
+    "Chat y llamadas": ["message_new", "chat_reply", "call_incoming", "call_missed"],
+    "Planificación": ["idea", "release", "calendar", "renewal"],
+    "Calidad": ["quality", "store"],
+    "Equipo y conocimiento": ["standup", "team_absence", "wiki", "daily_summary", "weekly_summary"],
+    "Cuenta y sistema": ["account", "system", "server_health"],
+}
+# «Lo importante»: lo que te afecta directamente. «Solo lo mío»: lo que te toca hacer a ti.
+NOTIFICATION_PRESETS = {
+    "importante": {"assigned", "mention", "verify_request", "verified", "rejected", "verify_waiting",
+                   "incident_critical", "incident_reopened", "task_updated", "incident_updated", "status_changed",
+                   "comment", "chat_reply", "call_incoming", "call_missed", "pending_digest", "due_soon", "sla",
+                   "dependency_unblocked", "reminder", "account", "system", "server_health", "release",
+                   "incident_blocked", "message_new", "calendar"},
+    "solo_mio": {"assigned", "mention", "verify_request", "verified", "rejected", "verify_waiting",
+                 "incident_reopened", "chat_reply", "call_incoming", "call_missed", "pending_digest", "due_soon",
+                 "sla", "dependency_unblocked", "reminder", "account", "system"},
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -275,6 +312,24 @@ def log_activity(db: Database, conn: sqlite3.Connection, user: dict | None, enti
     if user:
         conn.execute("UPDATE users SET last_action_at=?, last_action=? WHERE id=?", (ts, summary[:200], user["id"]))
     db.emit(conn, "activity", entity_type, entity_id, actor_id=user["id"] if user else None)
+    for hook in getattr(db, "activity_hooks", ()):
+        try:   # los avisos nunca deben impedir que se guarde el cambio
+            with savepoint(conn):
+                hook(conn, user, entity_type, entity_id, entity_key, action, summary, details, project_id)
+        except Exception:
+            logging.getLogger("devcontrol.avisos").exception("Error al generar avisos de %s %s", entity_type, action)
+
+
+@contextlib.contextmanager
+def savepoint(conn: sqlite3.Connection):
+    conn.execute("SAVEPOINT avisos")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK TO avisos")
+        conn.execute("RELEASE avisos")
+        raise
+    conn.execute("RELEASE avisos")
 
 
 def notify(db: Database, conn: sqlite3.Connection, user_ids, ntype: str, title: str, body: str,
@@ -297,4 +352,6 @@ def notify(db: Database, conn: sqlite3.Connection, user_ids, ntype: str, title: 
         if cur.rowcount:
             created += 1
             db.emit(conn, "notification", "notification", cur.lastrowid, user_id=uid)
+            if entity_type and entity_id:
+                getattr(db, "tx_notified", set()).add((uid, entity_type, entity_id))
     return created

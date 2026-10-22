@@ -59,8 +59,16 @@ Source: "..\dist\DEV CONTROL\*"; DestDir: "{app}"; Flags: ignoreversion recurses
 Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+; AppUserModelID: Windows asocia a este acceso directo los avisos del programa (nombre e icono).
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "DevControl.App"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+
+[Registry]
+; Pulsar un aviso de Windows abre devcontrol://aviso/<id> en el programa (también lo registra el propio programa).
+Root: HKCU; Subkey: "Software\Classes\devcontrol"; ValueType: string; ValueName: ""; ValueData: "URL:DEV CONTROL"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\devcontrol"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\devcontrol\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" --abrir ""%1"""
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\DevControl.App"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#AppName}"; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Abrir DEV CONTROL ahora"; Flags: nowait postinstall skipifsilent

@@ -199,6 +199,9 @@ class Agent:
         if not secret_file.exists():
             secret_file.write_text(secrets.token_urlsafe(24), encoding="utf-8")
         self.local_secret = secret_file.read_text(encoding="utf-8").strip()
+        from .notifier import Notifier
+        self.notifier = Notifier(self)
+        self._pending_open = ""
         last = self._load_json("conexion.json", {}).get("server", "")
         try:
             self.connect(last)
@@ -306,6 +309,7 @@ class Agent:
             "is_host": self.cfg.is_host, "is_host_server": self.is_host_server, "host": host_status,
             "profiles": self.profiles(), "desktop": "notify" in self.hooks, "computer_name": self.computer_name,
             "config_file": str(self.cfg.path) if self.cfg.path else "", "update": self.update_status(),
+            "notifier": self.notifier.status(),
         }
 
     def update_status(self) -> dict:
@@ -477,12 +481,27 @@ class Agent:
         threading.Thread(target=self.httpd.serve_forever, name="cliente-http", daemon=True).start()
         threading.Thread(target=self.health_loop, name="salud", daemon=True).start()
         threading.Thread(target=self.flush_loop, name="cola", daemon=True).start()
+        threading.Thread(target=self.notifier.loop, name="avisos", daemon=True).start()
         self.log.info("Programa local en http://127.0.0.1:%s -> servidor %s", self.local_port, self.server_key)
         return self.local_port
 
     @property
     def url(self) -> str:
         return f"http://127.0.0.1:{self.local_port}/"
+
+    # -- abrir un aviso concreto (desde un aviso de Windows) ------------------------------------------
+    def request_open(self, target: str, show: bool = True) -> None:
+        """target: «aviso/123». Se valida aquí: solo se acepta un número de aviso.
+        La interfaz lo recoge en su siguiente consulta (/local/presence)."""
+        kind, _, ident = target.strip("/").partition("/")
+        if kind == "aviso" and ident.isdigit() and len(ident) < 12:
+            self._pending_open = f"aviso/{ident}"
+            if show and "open_route" in self.hooks:
+                threading.Thread(target=self.hooks["open_route"], args=(self._pending_open,), daemon=True).start()
+
+    def take_pending_open(self) -> str:
+        value, self._pending_open = self._pending_open, ""
+        return value
 
     def shutdown(self):
         self.stop_event.set()
@@ -679,7 +698,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         if path == "/local/notify" and method == "POST":
             data = self._json_body()
-            if "notify" in agent.hooks:
+            if data.get("native") and "toast" in agent.hooks:   # «Probar un aviso de Windows»
+                agent.hooks["toast"](str(data.get("title") or APP_NAME)[:120], str(data.get("body") or "")[:300],
+                                     "devcontrol://aviso/0", False, "prueba")
+            elif "notify" in agent.hooks:
                 agent.hooks["notify"](str(data.get("title") or APP_NAME)[:120], str(data.get("body") or "")[:300],
                                       bool(data.get("urgent")))
             return self._json(200, {"ok": True})
@@ -716,9 +738,35 @@ class AgentHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._json(500, {"error": "servidor", "message": str(exc)})
             return self._json(200, agent.status())
+        if path == "/local/session" and method == "POST":
+            # La interfaz comparte su sesión para que los avisos de Windows lleguen aunque la ventana esté cerrada.
+            data = self._json_body()
+            token = str(data.get("token") or "")
+            if token:
+                agent.notifier.set_session(token, data.get("user_id") if isinstance(data.get("user_id"), int) else None)
+            else:
+                agent.notifier.clear_session()
+            return self._json(200, agent.notifier.status())
+        if path == "/local/presence" and method == "POST":
+            data = self._json_body()
+            agent.notifier.presence(bool(data.get("focused")), bool(data.get("in_call")), str(data.get("route") or ""))
+            return self._json(200, {"ok": True, "open": agent.take_pending_open()})
+        if path == "/local/update/postpone" and method == "POST":
+            if hasattr(agent.updater, "postpone"):
+                minutes = self._json_body().get("minutes")
+                agent.updater.postpone(minutes if isinstance(minutes, int) else 15)
+            return self._json(200, agent.update_status())
         if path in ("/local/shutdown", "/local/show") and method == "POST":
             if self.headers.get("X-DevControl-Local-Secret") != agent.local_secret:
                 return self._json(403, {"error": "sin_permiso", "message": "No autorizado."})
+            if path.endswith("show"):
+                # Otro arranque (p. ej. al pulsar un aviso de Windows) puede pedir abrir un aviso concreto.
+                try:
+                    target = str(json.loads(self._read_body(False)[0] or b"{}").get("open") or "")
+                except (ValueError, AttributeError):
+                    target = ""
+                if target:
+                    agent.request_open(target)
             hook = agent.hooks.get("show" if path.endswith("show") else "quit")
             if hook:
                 threading.Thread(target=hook, daemon=True).start()

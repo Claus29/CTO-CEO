@@ -648,6 +648,37 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
     desktop INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (user_id, type)
 );
+-- 2.2: seguir elementos, ajustes de avisos por persona y modo de aviso por canal (tablas nuevas, sin tocar las
+-- existentes: la base de datos sigue siendo compatible con la 2.1 si hubiera que volver atrás).
+CREATE TABLE IF NOT EXISTS follows (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS ix_follows_entity ON follows(entity_type, entity_id);
+CREATE TABLE IF NOT EXISTS notify_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    quiet_from TEXT,
+    quiet_to TEXT,
+    digest_time TEXT NOT NULL DEFAULT '09:00',
+    task_scope TEXT NOT NULL DEFAULT 'proyecto',
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS channel_prefs (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    channel_id INTEGER NOT NULL REFERENCES channels(id),
+    mode TEXT NOT NULL DEFAULT 'todo',
+    PRIMARY KEY (user_id, channel_id)
+);
+CREATE TABLE IF NOT EXISTS known_devices (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    label TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    PRIMARY KEY (user_id, label)
+);
+CREATE INDEX IF NOT EXISTS ix_notifications_entity ON notifications(entity_type, entity_id, created_at);
 CREATE TABLE IF NOT EXISTS changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -729,6 +760,7 @@ class Database:
         self.lock = threading.RLock()
         self.cond = threading.Condition()
         self._depth = 0
+        self.tx_notified: set = set()
         self._dirty = False
         self.conn: sqlite3.Connection | None = None
         self.before_migration = before_migration
@@ -775,6 +807,7 @@ class Database:
             outer = self._depth == 0
             if outer:
                 self.conn.execute("BEGIN IMMEDIATE")
+                self.tx_notified = set()   # (usuario, tipo de elemento, id) avisados en esta transacción
             self._depth += 1
             try:
                 yield self.conn

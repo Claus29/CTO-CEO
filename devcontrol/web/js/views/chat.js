@@ -124,12 +124,29 @@ export default async function render(ctx) {
         : channel?.project_id ? `Canal del proyecto ${projectById(channel.project_id)?.name || channel.project_key || ''}` : 'Canal personalizado'));
     clear(headMenu);
     if (channel) { const cb = callButtons({ channelId: channel.id }); if (cb) headMenu.appendChild(cb); }
+    if (channel) headMenu.appendChild(channelNotifyButton(channel));
     if (channel && channel.kind !== 'general' && can('chat.canales')) {
       headMenu.appendChild(menuButton(icon('dots'), [
         { label: 'Cambiar el nombre', icon: 'edit', onClick: renameChannel },
         { label: 'Archivar el canal', icon: 'box', danger: true, onClick: archiveChannel },
       ], { title: 'Opciones del canal', class: 'btn ghost sm icon' }));
     }
+  }
+
+  // Avisos de este canal: todos los mensajes, solo menciones y respuestas, o silenciado.
+  function channelNotifyButton(ch) {
+    const ICONS = { todo: 'bell', menciones: 'at', silencio: 'eyeoff' };
+    const btn = h('span');
+    const paint = (mode, modes) => {
+      mount(btn, menuButton(icon(ICONS[mode] || 'bell'), Object.entries(modes).map(([k, label]) => ({
+        label: (k === mode ? '✓ ' : '') + label, icon: ICONS[k] || 'bell',
+        onClick: () => api.put(`/api/channels/${ch.id}/notify`, { mode: k }).then(() => {
+          paint(k, modes); toast(`Avisos de este canal: ${label.toLowerCase()}.`, 'ok');
+        }).catch(err => toast(err.message, 'error')),
+      })), { title: `Avisos de este canal: ${(modes[mode] || '').toLowerCase()}`, class: 'btn ghost sm icon' }));
+    };
+    api.get(`/api/channels/${ch.id}/notify`).then(r => paint(r.mode, r.modes)).catch(() => {});
+    return btn;
   }
 
   async function newChannel() {

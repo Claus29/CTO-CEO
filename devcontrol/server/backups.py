@@ -379,7 +379,16 @@ def run_auto_backup(app) -> None:
         return
     last = app.backups.last_auto_time()
     if last is None or datetime.now() - last >= timedelta(hours=hours):
-        info = app.backups.create("auto")
+        try:
+            info = app.backups.create("auto")
+        except Exception as exc:
+            # Los administradores se enteran (una vez al día) en lugar de que falle en silencio.
+            from .common import notify, users_with_perm
+            with app.db.tx() as c:
+                notify(app.db, c, users_with_perm(c, "sistema.copias"), "server_health",
+                       "No se pudo crear la copia de seguridad automática", str(exc)[:300],
+                       f"backup-failed-{datetime.now().date().isoformat()}", urgent=True)
+            raise
         app.backups.apply_retention(int(app.db.get_setting("backup_keep")))
         app.log.info("Copia automática creada: %s", info["name"])
         with app.db.tx() as c:

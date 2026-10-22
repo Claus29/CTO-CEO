@@ -6,7 +6,7 @@ import {
   busy, clear, confirmDialog, debounce, draftKey, emptyState, errorBox, field, fmtDateTime, fmtRelative, fmtSize, h, icon,
   loading, modal, mount, richText, selectEl, toast, uid,
 } from '../ui.js';
-import { attachmentsSection } from './shared.js';
+import { attachmentsSection, followButton } from './shared.js';
 
 // ---------- Markdown sencillo → elementos (sin innerHTML) ----------
 const INLINE_SRC = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))|(\*[^*\s][^*\n]*\*)|((?<![\w])_[^_\s][^_\n]*_(?![\w]))/g;
@@ -198,6 +198,7 @@ export default async function render(ctx) {
           h('div', { class: 'small muted' }, `Editada por ${page.updated_by_name || '—'} ${fmtRelative(page.updated_at)} · creada por ${page.created_by_name || '—'} el ${fmtDateTime(page.created_at)}`,
             proj ? ' · ' : null, proj ? h('span', { class: 'badge neutral' }, `${proj.key} · ${proj.name}`) : null)),
         h('div', { class: 'actions' },
+          followButton('wiki', page.id),
           h('button', { class: 'btn', onclick: showHistory, disabled: !page.revisions.length, title: page.revisions.length ? 'Versiones anteriores' : 'Aún no hay versiones anteriores' },
             icon('clock'), `Historial (${page.revisions.length})`),
           canEdit ? h('button', { class: 'btn primary', onclick: () => startEdit() }, icon('edit'), 'Editar') : null)),

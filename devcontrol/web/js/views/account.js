@@ -1,7 +1,7 @@
 // Mi cuenta: perfil, seguridad (contraseña y verificación en dos pasos), sesiones, avisos,
 // primeros pasos y este equipo (servidores recordados, programa y actualizaciones).
 import { api } from '../api.js';
-import { pollLocal, refreshMe, store } from '../state.js';
+import { pollLocal, refreshMe, shareSession, store } from '../state.js';
 import {
   busy, confirmDialog, errorBox, field, fmtDateTime, fmtRelative, h, icon, loadJSON, loading, modal, mount, pageHead,
   saveJSON, tabs, toast,
@@ -192,15 +192,51 @@ async function prefsTab(root) {
     const tomorrow8 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(8, 0, 0, 0); return d; };
     custom.addEventListener('change', () => { if (custom.value) setMute(new Date(custom.value)); });
     const all = (key, val) => rows.forEach(r => { r[key].checked = val; r[key].dispatchEvent(new Event('change')); });
-    const save = h('button', { class: 'btn primary', onclick: () => busy(save, () => api.put('/api/notifications/prefs', {
+    const st = prefs.settings || {};
+    const quietOn = h('input', { type: 'checkbox', checked: !!(st.quiet_from && st.quiet_to) });
+    const quietFrom = h('input', { type: 'time', value: st.quiet_from || '20:00', class: 'adm-time' });
+    const quietTo = h('input', { type: 'time', value: st.quiet_to || '08:00', class: 'adm-time' });
+    const digest = h('input', { type: 'time', value: st.digest_time || '09:00', class: 'adm-time' });
+    const scope = h('select', null, Object.entries(prefs.task_scopes || {}).map(([k, label]) =>
+      h('option', { value: k, selected: k === (st.task_scope || 'proyecto') }, label)));
+    const syncQuiet = () => { quietFrom.disabled = quietTo.disabled = !quietOn.checked; };
+    quietOn.addEventListener('change', syncQuiet);
+    syncQuiet();
+    const payload = () => ({
       items: rows.map(r => ({ type: r.p.type, in_app: r.app.checked, desktop: r.app.checked && r.desk.checked })), mute_until: mute,
-    }), 'Preferencias guardadas.').then((res) => { prefs = res; store.prefs = res; }).catch(() => {}) }, 'Guardar preferencias');
+      settings: { quiet_from: quietOn.checked ? quietFrom.value : null, quiet_to: quietOn.checked ? quietTo.value : null,
+        digest_time: digest.value || '09:00', task_scope: scope.value },
+    });
+    const save = h('button', { class: 'btn primary', onclick: () => busy(save, () => api.put('/api/notifications/prefs', payload()),
+      'Preferencias guardadas.').then((res) => { prefs = res; store.prefs = res; shareSession(); }).catch(() => {}) }, 'Guardar preferencias');
+    const preset = (key) => busy(null, () => api.put('/api/notifications/prefs', { preset: key }),
+      `Ajuste aplicado: ${prefs.presets?.[key] || key}.`).then((res) => { prefs = res; store.prefs = res; shareSession(); draw(); }).catch(() => {});
+    const testBtn = store.local?.desktop ? h('button', { class: 'btn sm', onclick: () => busy(testBtn, () => api.local('POST', '/local/notify', {
+      title: 'Aviso de prueba de DEV CONTROL', body: 'Así verás los avisos aunque la ventana esté cerrada. Púlsalo para abrir el programa.', native: true,
+    }), 'Aviso enviado: debería aparecer abajo a la derecha.').catch(() => {}) }, icon('bell', 14), 'Probar un aviso de Windows') : null;
     const browserAsk = !store.local?.desktop && 'Notification' in window && Notification.permission === 'default'
       ? h('div', { class: 'callout info small row' }, h('span', { class: 'grow' }, 'Estás usando DEV CONTROL en un navegador. Para ver avisos de escritorio, permite las notificaciones.'),
         h('button', { class: 'btn sm', onclick: (e) => { Notification.requestPermission().then(() => e.target.closest('.callout')?.remove()); } }, 'Permitir'))
       : null;
+    const byType = new Map(rows.map(r => [r.p.type, r]));
+    const areas = (prefs.areas || [{ label: 'Avisos', types: rows.map(r => r.p.type) }]).map(a => ({ ...a, rows: a.types.map(t => byType.get(t)).filter(Boolean) }));
+    const listed = new Set(areas.flatMap(a => a.types));
+    const others = rows.filter(r => !listed.has(r.p.type));
+    if (others.length) areas.push({ label: 'Otros', rows: others });
     mount(root, h('div', { class: 'col gap-lg adm-narrow' },
       browserAsk,
+      h('div', { class: 'card' }, h('h3', null, 'Ajuste rápido'),
+        h('p', { class: 'small muted' }, 'Elige cuánto quieres enterarte. Después puedes afinar cada tipo de aviso más abajo.'),
+        h('div', { class: 'row wrap mt' },
+          h('button', { class: 'btn sm', onclick: () => preset('todo') }, 'Todo'),
+          h('button', { class: 'btn sm', onclick: () => preset('importante') }, 'Lo importante'),
+          h('button', { class: 'btn sm', onclick: () => preset('solo_mio') }, 'Solo lo mío'),
+          h('span', { class: 'grow' }), testBtn)),
+      h('div', { class: 'card' }, h('h3', null, 'Tareas, resumen y horario'),
+        field('De qué tareas quieres enterarte', scope, { hint: 'Siempre te avisamos de lo tuyo, de lo que sigues y de los proyectos que sigues (botón «Seguir»).' }),
+        field('«Tus pendientes»: resumen de cada mañana (laborables)', digest),
+        h('label', { class: 'row mt' }, quietOn, h('span', null, 'Horario de silencio: sin avisos de Windows de'), quietFrom, h('span', null, 'a'), quietTo),
+        h('p', { class: 'tiny muted' }, 'En el horario de silencio los avisos siguen llegando a «Avisos», pero Windows no los muestra (salvo los urgentes: incidencias críticas, rechazos y seguridad).')),
       h('div', { class: 'card' }, h('h3', null, 'No molestar'),
         muteInfo,
         h('div', { class: 'row wrap mt' },
@@ -215,9 +251,11 @@ async function prefsTab(root) {
         h('div', { class: 'table-wrap adm-noborder' }, h('table', { class: 'table' },
           h('thead', null, h('tr', null, h('th', null, 'Tipo de aviso'),
             h('th', { class: 'adm-c' }, 'En la app', h('div', null, h('button', { class: 'btn sm ghost', onclick: () => all('app', !rows.every(r => r.app.checked)) }, 'todos'))),
-            h('th', { class: 'adm-c' }, 'En el escritorio', h('div', null, h('button', { class: 'btn sm ghost', onclick: () => all('desk', !rows.every(r => r.desk.checked)) }, 'todos'))))),
-          h('tbody', null, rows.map(r => h('tr', null, h('td', null, r.p.label), h('td', { class: 'adm-c' }, r.app), h('td', { class: 'adm-c' }, r.desk))))))),
-      h('p', { class: 'tiny muted' }, '«En la app»: el aviso aparece en la campana. Si lo desmarcas, no se crea. «En el escritorio»: además sale una ventanita de Windows aunque DEV CONTROL esté minimizado.'),
+            h('th', { class: 'adm-c' }, 'Aviso de Windows', h('div', null, h('button', { class: 'btn sm ghost', onclick: () => all('desk', !rows.every(r => r.desk.checked)) }, 'todos'))))),
+          areas.map(a => h('tbody', null,
+            h('tr', { class: 'adm-group' }, h('th', { colspan: 3 }, a.label)),
+            a.rows.map(r => h('tr', null, h('td', null, r.p.label), h('td', { class: 'adm-c' }, r.app), h('td', { class: 'adm-c' }, r.desk)))))))),
+      h('p', { class: 'tiny muted' }, '«En la app»: el aviso aparece en la campana. Si lo desmarcas, no se crea. «Aviso de Windows»: además sale un aviso en la esquina de la pantalla aunque DEV CONTROL esté cerrado en la bandeja; al pulsarlo se abre lo que ha cambiado.'),
       h('div', { class: 'adm-savebar' }, h('span', { class: 'grow' }), save)));
   }
   mount(root, loading());

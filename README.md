@@ -34,6 +34,9 @@ tareas y tablero, planificación, calidad, chat, wiki y mucho más, en un progra
 - **Calidad**: builds, planes y ejecuciones de prueba (un fallo se convierte en incidencia) y publicaciones en tiendas.
 - **Equipo**: carga de trabajo frente a capacidad, ausencias, **daily asíncrono**, registro de tiempo y «quién hace qué ahora».
 - **Chat** por canales con respuestas, menciones, adjuntos, recordatorios y «convertir en tarea».
+- **Avisos de Windows** aunque la ventana esté cerrada: tareas creadas y editadas, cambios de estado, chat, «Tus
+  pendientes» cada mañana, verificaciones y mucho más, con **Seguir**, horario de silencio y preferencias por tipo
+  ([docs/AVISOS.md](docs/AVISOS.md)).
 - **Llamadas de voz y vídeo** entre cuentas, de 2 o de grupo, con compartir pantalla: directas entre equipos o a
   través del anfitrión si no pueden verse ([docs/LLAMADAS.md](docs/LLAMADAS.md)).
 - **Conocimiento**: wiki con historial y **registro de decisiones** (`DEC-001`).
@@ -91,7 +94,8 @@ Desinstalar o reinstalar **nunca** borra estas carpetas. Más en [docs/DATOS_Y_C
 ## Actualizaciones
 
 El anfitrión busca versiones nuevas en este repositorio (privado: con una clave de acceso de solo lectura que se pone
-en Ajustes) y las reparte a los demás equipos, que no necesitan GitHub. Si hay una, **la actualización es obligatoria**: el anfitrión
+en Ajustes) y las reparte a los demás equipos, que no necesitan GitHub. **Las versiones nuevas se instalan solas** en
+todos los equipos (con aviso de 2 minutos y nunca durante una llamada). Si hay una, **la actualización es obligatoria**: el anfitrión
 se actualiza primero y, en cuanto lo hace, los demás equipos deben actualizarse para seguir trabajando. Cada versión
 está **firmada** (Ed25519) y se comprueba su huella antes de instalarla; antes se hace una copia de seguridad y,
 después, se verifica que la versión nueva arranca y que no falta ningún dato. Si algo falla, se vuelve solo a la

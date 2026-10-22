@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--version", action="store_true")
     p.add_argument("--verificar-actualizacion", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--revertir-datos", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--abrir", default="", help=argparse.SUPPRESS)   # devcontrol://aviso/<id> (avisos de Windows)
     args = p.parse_args(argv)
 
     if args.version:
@@ -62,8 +63,9 @@ def main(argv: list[str] | None = None) -> int:
         open_path(report)
         return code
     from .desktop import App
+    from .toast import parse_link
     app = App(layout, headless=args.sin_ventana, port=args.puerto_local)
-    return app.run(start_hidden=args.inicio)
+    return app.run(start_hidden=args.inicio, open_target=parse_link(args.abrir))
 
 
 def cmd_backup(layout, cfg) -> int:

@@ -313,9 +313,21 @@ def register(router, app):
                 raise not_found("El caso no forma parte de esta ejecución.")
             c.execute("UPDATE test_results SET result=?, note=?, updated_by=?, updated_at=? WHERE run_id=? AND case_id=?",
                       (result, clean_text(data.get("note"), "nota", 2000), user["id"], now_iso(), rid, cid))
+            if result == "fallo" and row["result"] != "fallo":
+                notify(db, c, {run["created_by"]} | set(users_with_perm(c, "calidad.editar", run["project_id"])),
+                       "quality", f"Prueba fallida: {row['title']}",
+                       f"{user['display_name']} en «{run['title']}»" + (f" · {run['device']}" if run["device"] else ""),
+                       f"test-fail-{rid}-{cid}-{now_iso()}", "test_run", int(rid), exclude=user["id"])
             if c.execute("SELECT COUNT(*) FROM test_results WHERE run_id=? AND result='pendiente'", (rid,)).fetchone()[0] == 0:
-                c.execute("UPDATE test_runs SET status='terminada', finished_at=COALESCE(finished_at, ?) WHERE id=?",
-                          (now_iso(), rid))
+                done = c.execute("UPDATE test_runs SET status='terminada', finished_at=COALESCE(finished_at, ?) "
+                                 "WHERE id=? AND status<>'terminada'", (now_iso(), rid)).rowcount
+                if done:
+                    fails = c.execute("SELECT COUNT(*) FROM test_results WHERE run_id=? AND result='fallo'",
+                                      (rid,)).fetchone()[0]
+                    notify(db, c, {run["created_by"]} | set(users_with_perm(c, "calidad.ver", run["project_id"])),
+                           "quality", f"Pruebas terminadas: {run['title']}",
+                           f"{fails} fallo{'s' if fails != 1 else ''}" if fails else "Todo correcto",
+                           f"test-run-done-{rid}", "test_run", int(rid), exclude=user["id"])
             db.emit(c, "test", "test_run", int(rid), actor_id=user["id"])
         # Para un fallo, el cliente abre el formulario de incidencia con estos datos rellenados.
         prefill = None

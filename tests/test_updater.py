@@ -220,3 +220,46 @@ def test_token_never_sent_to_other_hosts():
     finally:
         target.shutdown()
         origin.shutdown()
+
+
+def test_new_version_installs_by_itself(layout, keys, monkeypatch):
+    """2.2: una versión nueva se instala sola tras el aviso, espera si hay una llamada y no reintenta lo que falló."""
+    cfg = load_config(layout)
+    raw = manifest()
+    applied, scheduled, busy = [], [], {"reason": "Estás en una llamada"}
+    up = updater.Updater(layout, cfg, http_get=fake_github(raw, updater.sign_manifest(raw, keys)),
+                         hooks={"predownload": False, "auto_scheduled": lambda v, s: scheduled.append((v, s)),
+                                "busy": lambda: busy["reason"]})
+    monkeypatch.setattr(updater.Updater, "installable", staticmethod(lambda: True))
+    monkeypatch.setattr(up, "apply", lambda: applied.append(up.latest["version"]))
+    up.check(force=True)
+    st = up.status()
+    assert scheduled == [("9.9.9", updater.AUTO_DELAY)] and 0 < st["auto_in"] <= updater.AUTO_DELAY
+    up.tick_auto()
+    assert applied == []                                   # aún no ha llegado la hora
+    up.auto_at = 0
+    up.tick_auto()
+    assert applied == [] and up.status()["waiting_reason"] == "Estás en una llamada"   # nunca durante una llamada
+    busy["reason"] = None
+    up.auto_at = 0
+    up.tick_auto()
+    assert applied == ["9.9.9"] and up.status()["auto_in"] is None
+    # posponer
+    up.check(force=True)
+    before = up.auto_at
+    up.postpone(15)
+    assert up.auto_at >= before + 14 * 60 - updater.AUTO_DELAY
+    # si esa versión falló y se volvió atrás, no se reintenta sola
+    up2 = updater.Updater(layout, cfg, http_get=fake_github(raw, updater.sign_manifest(raw, keys)),
+                          hooks={"predownload": False})
+    updater.write_marker(layout, {"from": APP_VERSION, "to": "9.9.9", "result": "revertida",
+                                  "finished_at": __import__("datetime").datetime.now().isoformat()})
+    up2.check(force=True)
+    assert up2.auto_at is None and "falló" in up2.status()["auto_blocked"]
+    # con «automaticas = no» solo se avisa
+    cfg.auto_update = False
+    up3 = updater.Updater(layout, cfg, http_get=fake_github(raw, updater.sign_manifest(raw, keys)),
+                          hooks={"predownload": False})
+    updater.write_marker(layout, {})
+    up3.check(force=True)
+    assert up3.auto_at is None and up3.status()["available"]

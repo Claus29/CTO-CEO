@@ -39,6 +39,7 @@ from . import (
     relations,
     reports,
     team,
+    watch,
 )
 from .attachments import AttachmentStore
 from .backups import BackupError, BackupManager, db_member_of, run_auto_backup
@@ -51,8 +52,8 @@ from .web import BaseHandler, HttpError, QuietServer, Response, Router, bad_requ
 LONG_POLL_MAX = 30
 DB_NAME = "devcontrol.db"
 MODULES = (relations, incidents, attachments, chat, calls, planning, quality, knowledge, team, reports, integrations,
-           notifications, backups, exports)
-FEATURES = ["calls"]
+           watch, notifications, backups, exports)
+FEATURES = ["calls", "follows"]
 # Rutas permitidas mientras el usuario debe cambiar la contraseña o activar la verificación en dos pasos.
 GATE_ALLOWED = {"/api/me", "/api/me/password", "/api/logout", "/api/me/2fa/start", "/api/me/2fa/confirm",
                 "/api/changes", "/api/health"}
@@ -147,6 +148,22 @@ class ServerApp:
         self._register_core()
         for module in MODULES:
             module.register(self.router, self)
+
+    def _note_device(self, user: dict, label: str, ip: str) -> None:
+        """Aviso de seguridad si alguien entra en tu cuenta desde un equipo que nunca habías usado."""
+        if not label:
+            return
+        from .common import notify
+        with self.db.tx() as c:
+            known = {r[0] for r in c.execute("SELECT label FROM known_devices WHERE user_id=?", (user["id"],))}
+            if label in known:
+                return
+            c.execute("INSERT OR IGNORE INTO known_devices(user_id, label, first_seen) VALUES (?,?,?)",
+                      (user["id"], label, now_iso()))
+            if known:
+                notify(self.db, c, [user["id"]], "account", f"Nuevo inicio de sesión desde «{label}»",
+                       f"Desde {ip}. Si no has sido tú, cambia tu contraseña y cierra las demás sesiones en Mi cuenta.",
+                       f"device-{user['id']}-{label}", "user", user["id"], urgent=True)
 
     def _record_import(self, source: Path) -> None:
         counts = {t: self.db.scalar(f"SELECT COUNT(*) FROM {t}") for t in ("incidents", "tasks", "messages", "users")}
@@ -505,6 +522,7 @@ class ServerApp:
             self.throttle.reset(throttle_key)
             label = clean_text(data.get("client_label"), "equipo", 80)
             token, expires = auth.create_session(db, row["id"], bool(data.get("remember")), req.client_ip, label)
+            self._note_device(row, label, req.client_ip)
             self._touch(row)
             self.log.info("Inicio de sesión de %s desde %s", username, req.client_ip)
             row["permissions"] = self.perms.for_role(row["role_id"])

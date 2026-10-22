@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from .common import NOTIFICATION_TYPES, OPEN_INCIDENT, all_users, clean_int, notify, users_with_perm
+from .common import NOTIFICATION_AREAS, NOTIFICATION_TYPES, OPEN_INCIDENT, all_users, clean_int, notify, users_with_perm
 from .db import parse_iso
 from .incidents import sla_info
 from .web import bad_request
@@ -51,7 +51,13 @@ def register(router, app):
         stored = {r["type"]: r for r in db.query("SELECT * FROM notification_prefs WHERE user_id=?", (uid,))}
         items = [{"type": t, "label": label, "in_app": bool(stored[t]["in_app"]) if t in stored else True,
                   "desktop": bool(stored[t]["desktop"]) if t in stored else True} for t, label in NOTIFICATION_TYPES.items()]
-        return {"items": items, "mute_until": db.scalar("SELECT mute_until FROM users WHERE id=?", (uid,))}
+        from .watch import CHANNEL_MODES, TASK_SCOPES, settings_for
+        with db.tx() as c:
+            settings = settings_for(c, uid)
+        return {"items": items, "mute_until": db.scalar("SELECT mute_until FROM users WHERE id=?", (uid,)),
+                "areas": [{"label": a, "types": ts} for a, ts in NOTIFICATION_AREAS.items()],
+                "settings": settings, "task_scopes": TASK_SCOPES, "channel_modes": CHANNEL_MODES,
+                "presets": {"todo": "Todo", "importante": "Lo importante", "solo_mio": "Solo lo mío"}}
 
     app.notification_prefs = prefs_for
 
@@ -64,6 +70,12 @@ def register(router, app):
         data = req.json
         uid = req.user["id"]
         with db.tx() as c:
+            if data.get("preset"):
+                if data["preset"] not in ("todo", "importante", "solo_mio"):
+                    raise bad_request("Ajuste rápido no válido.")
+                app.notify_preset(c, uid, data["preset"])
+            if isinstance(data.get("settings"), dict):
+                app.notify_settings_save(c, uid, data["settings"])
             for item in data.get("items") or []:
                 t = item.get("type")
                 if t not in NOTIFICATION_TYPES:
@@ -78,6 +90,15 @@ def register(router, app):
                 c.execute("UPDATE users SET mute_until=? WHERE id=?", (mute, uid))
         return prefs_for(uid)
 
+    # Después de /prefs: si no, «prefs» se tomaría por el número de un aviso.
+    @router.route("GET", "/api/notifications/{nid}")
+    def one_notification(req, nid):
+        row = db.query_one("SELECT * FROM notifications WHERE id=? AND user_id=?", (nid, req.user["id"]))
+        if not row:
+            from .web import not_found
+            raise not_found("El aviso no existe.")
+        return {"item": row}
+
 
 class NotificationJobs:
     """Avisos que no dependen de una acción concreta. Cada uno lleva su clave de deduplicación."""
@@ -89,7 +110,8 @@ class NotificationJobs:
     def run(self, now: datetime | None = None) -> None:
         now = now or datetime.now()
         for job in (self.due_dates, self.stale, self.sla, self.renewals, self.standup, self.daily_summary,
-                    self.weekly_summary):
+                    self.weekly_summary, self.pending_digest, self.verify_waiting, self.calendar, self.absences,
+                    self.version_risk, self.disk_space):
             try:
                 job(now)
             except Exception:  # un aviso que falla no debe parar a los demás
@@ -242,5 +264,115 @@ class NotificationJobs:
         with self.db.tx() as c:
             notify(self.db, c, all_users(c), "weekly_summary", f"Resumen semanal · semana {iso[1]}", text,
                    f"weekly-{iso[0]}-{iso[1]}", "summary", None)
+
+    # -- 2.2 ------------------------------------------------------------------------------------------
+    def pending_digest(self, now: datetime) -> None:
+        """«Tus pendientes»: cada día laborable, a la hora que elige cada persona (09:00 por defecto)."""
+        if now.weekday() >= 5:
+            return
+        day, hhmm = now.date().isoformat(), now.strftime("%H:%M")
+        with self.db.tx() as c:
+            times = {r[0]: r[1] for r in c.execute("SELECT user_id, digest_time FROM notify_settings")}
+            for uid in all_users(c):
+                if hhmm < (times.get(uid) or "09:00"):
+                    continue
+                if c.execute("SELECT 1 FROM notifications WHERE user_id=? AND dedupe_key=?",
+                             (uid, f"digest-{day}")).fetchone():
+                    continue
+                parts = []
+                tasks = c.execute("SELECT COUNT(*) FROM tasks WHERE assignee_id=? AND status IN ('pendiente',"
+                                  "'en_progreso','bloqueada')", (uid,)).fetchone()[0]
+                incs = c.execute("SELECT COUNT(*) FROM incidents WHERE assignee_id=? AND status IN ('pendiente',"
+                                 "'en_progreso','bloqueada')", (uid,)).fetchone()[0]
+                if tasks or incs:
+                    what = " y ".join(x for x in (f"{tasks} tarea{'s' if tasks != 1 else ''}" if tasks else "",
+                                                   f"{incs} incidencia{'s' if incs != 1 else ''}" if incs else "") if x)
+                    parts.append(f"Tienes asignada{'s' if tasks + incs != 1 else ''} {what}")
+                verify = c.execute("SELECT (SELECT COUNT(*) FROM tasks WHERE created_by=? AND status='en_verificacion')"
+                                   " + (SELECT COUNT(*) FROM incidents WHERE created_by=? AND "
+                                   "status='en_verificacion')", (uid, uid)).fetchone()[0]
+                if verify:
+                    parts.append(f"{verify} espera{'n' if verify != 1 else ''} tu verificación")
+                due = c.execute("SELECT (SELECT COUNT(*) FROM tasks WHERE assignee_id=? AND status IN ('pendiente',"
+                                "'en_progreso','bloqueada') AND target_date <= ?) + (SELECT COUNT(*) FROM incidents "
+                                "WHERE assignee_id=? AND status IN ('pendiente','en_progreso','bloqueada') AND "
+                                "target_date <= ?)", (uid, day, uid, day)).fetchone()[0]
+                if due:
+                    parts.append(f"{due} vence{'n' if due != 1 else ''} hoy o ya ha{'n' if due != 1 else ''} vencido")
+                if parts:
+                    notify(self.db, c, [uid], "pending_digest", "Tus pendientes de hoy", " · ".join(parts),
+                           f"digest-{day}", "pending", None, urgent=bool(due))
+
+    def verify_waiting(self, now: datetime) -> None:
+        """Lo que lleva más de un día esperando verificación: recordatorio diario a quien debe verificarlo."""
+        day = now.date().isoformat()
+        limit = utc_ago(1)
+        with self.db.tx() as c:
+            for etype, table, perm in (("task", "tasks", "tareas.verificar_todas"),
+                                       ("incident", "incidents", "incidencias.verificar_todas")):
+                rows = c.execute(f"SELECT id, key, title, created_by, project_id FROM {table} WHERE "
+                                 f"status='en_verificacion' AND verification_requested_at < ?", (limit,)).fetchall()
+                for r in rows:
+                    notify(self.db, c, {r["created_by"]} | set(users_with_perm(c, perm, r["project_id"])),
+                           "verify_waiting", f"{r['key']} lleva más de un día esperando tu verificación", r["title"],
+                           f"verify-wait-{etype}-{r['id']}-{day}", etype, r["id"], r["key"])
+
+    def calendar(self, now: datetime) -> None:
+        if now.hour < 8:
+            return
+        today = now.date()
+        with self.db.tx() as c:
+            for when, label in ((today, "Hoy"), (today + timedelta(days=1), "Mañana")):
+                for r in c.execute("SELECT id, title, project_id, description FROM project_dates WHERE date=?",
+                                   (when.isoformat(),)).fetchall():
+                    notify(self.db, c, users_with_perm(c, "planificacion.ver", r["project_id"]), "calendar",
+                           f"{label}: {r['title']}", r["description"][:200], f"date-{r['id']}-{label}", "date", r["id"])
+
+    def absences(self, now: datetime) -> None:
+        if now.hour < 9:
+            return
+        tomorrow = (now.date() + timedelta(days=1)).isoformat()
+        with self.db.tx() as c:
+            for r in c.execute("SELECT a.id, a.user_id, a.end_date, u.display_name FROM absences a JOIN users u "
+                               "ON u.id=a.user_id WHERE a.start_date=?", (tomorrow,)).fetchall():
+                mates = {x[0] for x in c.execute(
+                    "SELECT DISTINCT pm2.user_id FROM project_members pm1 JOIN project_members pm2 "
+                    "ON pm2.project_id=pm1.project_id WHERE pm1.user_id=?", (r["user_id"],))}
+                mates.discard(r["user_id"])
+                until = "" if r["end_date"] == tomorrow else f" (hasta el {r['end_date']})"
+                notify(self.db, c, mates, "team_absence", f"Mañana no está {r['display_name']}{until}",
+                       "Revisa si tiene algo asignado que necesites.", f"absence-tomorrow-{r['id']}", "absence", r["id"])
+
+    def version_risk(self, now: datetime) -> None:
+        today = now.date()
+        soon = (today + timedelta(days=3)).isoformat()
+        with self.db.tx() as c:
+            for v in c.execute("SELECT id, name, project_id, target_date, created_by FROM versions WHERE "
+                               "status<>'publicada' AND target_date BETWEEN ? AND ?",
+                               (today.isoformat(), soon)).fetchall():
+                open_ = c.execute("SELECT COUNT(*) FROM tasks WHERE version_id=? AND status<>'resuelto'",
+                                  (v["id"],)).fetchone()[0]
+                if open_:
+                    notify(self.db, c, {v["created_by"]} | set(users_with_perm(c, "planificacion.editar",
+                                                                                v["project_id"])), "release",
+                           f"La versión {v['name']} sale el {v['target_date']} y tiene {open_} tareas abiertas",
+                           "Revisa el roadmap: quizá haya que mover tareas o la fecha.",
+                           f"version-risk-{v['id']}-{v['target_date']}", "version", v["id"])
+
+    def disk_space(self, now: datetime) -> None:
+        import shutil
+        folder = getattr(self.app, "data_dir", None)
+        if folder is None:
+            return
+        try:
+            free = shutil.disk_usage(folder).free
+        except OSError:
+            return
+        if free < 2 * 1024 ** 3:
+            with self.db.tx() as c:
+                notify(self.db, c, users_with_perm(c, "sistema.copias"), "server_health",
+                       "Queda poco espacio en el disco del anfitrión",
+                       f"Libres: {free / 1024 ** 3:.1f} GB. Las copias de seguridad pueden fallar.",
+                       f"disk-low-{now.date().isoformat()}", urgent=True)
 
     _ = parse_iso
