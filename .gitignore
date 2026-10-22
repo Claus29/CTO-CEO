@@ -17,3 +17,5 @@ Thumbs.db
 *.pem
 node_modules/
 capturas/
+# Bot conector: guarda los ids de la pareja anclada
+bots/pareja.json
