@@ -30,6 +30,8 @@ jobs:
           $exe = "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe"
           if (-not (Test-Path $exe)) { Get-Content "$env:RUNNER_TEMP\inst\primera.log" -Tail 60; throw "No se instaló" }
           (Get-Item $exe).VersionInfo | Format-List FileVersion, ProductVersion
+          # Como el equipo del usuario: este equipo es el anfitrión (el instalador silencioso deja «miembro»).
+          Set-Content -LiteralPath "$env:LOCALAPPDATA\DEV CONTROL\instalacion.ini" -Value "[instalacion]`r`nrol = anfitrion`r`niniciar_con_windows = no`r`n" -Encoding UTF8
           Get-ChildItem "$env:LOCALAPPDATA\DEV CONTROL" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | Out-String | Write-Host
 
       - name: Abrir el programa y pedir la actualización
