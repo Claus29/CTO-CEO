@@ -74,6 +74,9 @@ Actions (`DEVCONTROL_SIGNING_KEY`).
 6. Si todo va bien, se abre normalmente y lo anota en `registro.txt`. Si algo falla, **vuelve sola a la versión
    anterior y a la copia de los datos** y también lo anota.
 
+La instalación (pasos 3 a 6) la hace una copia del programa guardada en
+`%LOCALAPPDATA%\DEV CONTROL\Programa anterior`, que sigue funcionando cuando DEV CONTROL se cierra y anota cada paso.
+
 Ejemplo de `registro.txt`:
 
 ```

@@ -6,7 +6,7 @@
   DEV CONTROL.exe --copia             crea una copia de seguridad (con el servidor detenido)
   DEV CONTROL.exe --diagnostico       comprueba la conexión con el servidor y muestra las carpetas
   DEV CONTROL.exe --version           muestra la versión
-  --verificar-actualizacion / --revertir-datos  los usa el actualizador
+  --verificar-actualizacion / --revertir-datos / --aplicar-actualizacion  los usa el actualizador
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--version", action="store_true")
     p.add_argument("--verificar-actualizacion", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--revertir-datos", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--aplicar-actualizacion", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--abrir", default="", help=argparse.SUPPRESS)   # devcontrol://aviso/<id> (avisos de Windows)
     args = p.parse_args(argv)
 
@@ -44,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.verificar_actualizacion:
         from .updater import verify_after_update
         return verify_after_update(layout, cfg)
+    if args.aplicar_actualizacion:   # copia del programa que instala la versión nueva cuando DEV CONTROL se cierra
+        from .updater import apply_update_helper
+        return apply_update_helper(layout)
     if args.revertir_datos:
         from .updater import revert_data
         return revert_data(layout, cfg)

@@ -2,6 +2,16 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.2.1] - 2026-10-23
+
+- **Arreglo importante de las actualizaciones**: al pulsar «Actualizar ahora» el programa se cerraba pero la versión
+  nueva no llegaba a instalarse ni se volvía a abrir. Windows no dejaba arrancar el ayudante (PowerShell oculto) que la
+  instalaba. Ahora la instala una copia del propio programa, que anota cada paso en `registro.txt`, comprueba la
+  versión nueva y la abre (o vuelve a la anterior si algo falla). Tras actualizarse se abre igual que estaba (por
+  ejemplo, oculto en la bandeja).
+- Comprobado de principio a fin en un Windows real: una versión instalada se actualiza sola a la siguiente y vuelve a
+  abrirse.
+
 ## [2.2.0] - 2026-10-23
 
 - **Las actualizaciones se instalan solas.** Cuando se publica una versión nueva, el anfitrión la detecta (busca cada

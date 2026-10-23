@@ -511,14 +511,17 @@ class Updater:
             shutil.copytree(prog, previous)
             marker["program_dir"] = str(prog)
             marker["previous_dir"] = str(previous)
+            marker["pid"] = os.getpid()
+            marker["relaunch_args"] = relaunch_args(sys.argv[1:])
             write_marker(self.layout, marker)
             write_log(self.layout, f"Iniciando la actualización de {APP_VERSION} a {latest['version']}.")
-            script = self.layout.updates_dir / "aplicar_actualizacion.ps1"
-            script.write_text(build_script(installer, prog, previous, self.layout, os.getpid()), encoding="utf-8-sig")
+            # La instalación la hace la copia del programa que acabamos de guardar en «Programa anterior»: no está
+            # en la carpeta que el instalador va a sustituir y sigue funcionando cuando este proceso se cierra.
+            # (Antes se usaba PowerShell, que Windows no deja arrancar oculto desde el programa.)
+            helper = previous / Path(sys.executable).name
             self.state = "applying"
-            flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
-            subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                              "-File", str(script)], creationflags=flags, close_fds=True)
+            spawn_detached([str(helper), "--aplicar-actualizacion"])
+            write_log(self.layout, "Programa de instalación en marcha: DEV CONTROL se cierra para actualizarse.")
             time.sleep(1)
             if "quit" in self.hooks:
                 self.hooks["quit"]()
@@ -527,37 +530,114 @@ class Updater:
             write_log(self.layout, f"No se pudo actualizar a {latest.get('version')}: {exc}")
 
 
-def _ps(text) -> str:
-    return "'" + str(text).replace("'", "''") + "'"
+def spawn_detached(args: list[str]) -> None:
+    """Arranca un proceso que sigue vivo aunque DEV CONTROL se cierre (sin consola y fuera del grupo de trabajos)."""
+    common = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+              "close_fds": True}
+    if os.name != "nt":
+        subprocess.Popen(args, start_new_session=True, **common)
+        return
+    detached, new_group, breakaway = 0x00000008, 0x00000200, 0x01000000
+    try:
+        subprocess.Popen(args, creationflags=detached | new_group | breakaway, **common)
+    except OSError:   # el trabajo que contiene al programa no permite salir de él: sin esa marca
+        subprocess.Popen(args, creationflags=detached | new_group, **common)
 
 
-def build_script(installer: Path, prog: Path, previous: Path, layout: Layout, pid: int) -> str:
-    exe = prog / "DEV CONTROL.exe"
-    log = layout.updates_dir / LOG_NAME
-    inst_log = layout.updates_dir / "instalador.log"
-    return f"""$ErrorActionPreference = 'Continue'
-$log = {_ps(log)}
-$exe = {_ps(exe)}
-$prog = {_ps(prog)}
-$prev = {_ps(previous)}
-function Write-Log($t) {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '  ' + $t) -Encoding UTF8 }}
-function Restore-Previous($why) {{
-  Write-Log ('FALLO: ' + $why + ' Se vuelve a la versión anterior.')
-  robocopy $prev $prog /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS | Out-Null
-  $r = Start-Process -FilePath $exe -ArgumentList '--revertir-datos' -Wait -PassThru
-  Start-Process -FilePath $exe
-  exit 1
-}}
-$deadline = (Get-Date).AddSeconds(90)
-while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 500 }}
-Start-Sleep -Seconds 1
-$p = Start-Process -FilePath {_ps(installer)} -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/ACTUALIZACION=1', ('/LOG="' + {_ps(inst_log)} + '"')) -Wait -PassThru
-if ($p.ExitCode -ne 0) {{ Restore-Previous ('el instalador terminó con el código ' + $p.ExitCode + '.') }}
-$v = Start-Process -FilePath $exe -ArgumentList '--verificar-actualizacion' -Wait -PassThru
-if ($v.ExitCode -ne 0) {{ Restore-Previous 'la versión nueva no ha superado la comprobación.' }}
-Start-Process -FilePath $exe
-exit 0
-"""
+def relaunch_args(argv: list[str]) -> list[str]:
+    """Al volver a abrirse tras actualizar, igual que estaba: oculto en la bandeja, sin ventana o con otro puerto."""
+    out, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--inicio", "--sin-ventana"):
+            out.append(a)
+        elif a == "--puerto-local" and i + 1 < len(argv) and argv[i + 1].isdigit():
+            out += [a, argv[i + 1]]
+            i += 1
+        i += 1
+    return out
+
+
+def _wait_pid(pid: int | None, timeout: float) -> None:
+    if not pid:
+        return
+    end = time.monotonic() + timeout
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))   # SYNCHRONIZE
+        if handle:
+            try:
+                ctypes.windll.kernel32.WaitForSingleObject(handle, int(timeout * 1000))
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        return
+    while time.monotonic() < end:
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            return
+        time.sleep(0.3)
+
+
+def _program_exe(prog: Path) -> Path:
+    return prog / ("DEV CONTROL.exe" if os.name == "nt" else "DEV CONTROL")
+
+
+def apply_update_helper(layout: Layout, installer_args: list[str] | None = None) -> int:
+    """--aplicar-actualizacion: lo ejecuta la COPIA del programa (en «Programa anterior») cuando DEV CONTROL se
+    cierra para actualizarse. Instala en silencio, comprueba la versión nueva y la abre; si algo falla, deja el
+    programa anterior como estaba y lo abre. Cada paso queda en registro.txt."""
+    marker = read_marker(layout) or {}
+    try:
+        installer = Path(marker["installer"])
+        prog = Path(marker["program_dir"])
+        prev = Path(marker["previous_dir"])
+    except KeyError:
+        write_log(layout, "No hay ninguna actualización pendiente que instalar.")
+        return 1
+    exe = _program_exe(prog)
+    relaunch = relaunch_args(marker.get("relaunch_args") or [])
+
+    def restore(why: str) -> int:
+        write_log(layout, f"FALLO: {why} Se vuelve a la versión anterior.")
+        try:
+            if prev.is_dir():
+                for item in prog.iterdir() if prog.is_dir() else []:
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                shutil.copytree(prev, prog, dirs_exist_ok=True)
+            subprocess.run([str(exe), "--revertir-datos"], timeout=600, check=False)
+        except Exception as exc:
+            write_log(layout, f"No se pudo restaurar el programa anterior automáticamente: {exc}. Reinstálalo con "
+                              f"el instalador de Documentos\\DEV CONTROL\\Actualizaciones.")
+        spawn_detached([str(exe), *relaunch])
+        return 1
+
+    write_log(layout, "Esperando a que DEV CONTROL se cierre…")
+    _wait_pid(marker.get("pid"), 120)
+    time.sleep(1)
+    write_log(layout, f"Instalando la versión {marker.get('to')}…")
+    args = installer_args if installer_args is not None else [
+        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/ACTUALIZACION=1",
+        f"/LOG={layout.updates_dir / 'instalador.log'}"]
+    try:
+        r = subprocess.run([str(installer), *args], timeout=900, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return restore(f"no se pudo ejecutar el instalador ({exc}).")
+    write_log(layout, f"El instalador ha terminado (código {r.returncode}).")
+    if r.returncode != 0:
+        return restore(f"el instalador terminó con el código {r.returncode}.")
+    try:
+        v = subprocess.run([str(exe), "--verificar-actualizacion"], timeout=900, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return restore(f"no se pudo abrir la versión nueva ({exc}).")
+    if v.returncode != 0:
+        return restore("la versión nueva no ha superado la comprobación.")
+    write_log(layout, "Abriendo la versión nueva.")
+    spawn_detached([str(exe), *relaunch])
+    return 0
 
 
 def _counts(db) -> dict:

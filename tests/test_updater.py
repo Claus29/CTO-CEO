@@ -2,7 +2,10 @@
 import base64
 import hashlib
 import json
+import os
+import shutil
 import threading
+import time
 import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -134,10 +137,48 @@ def test_verify_after_update_and_revert(layout, admin, server):
     assert "Se ha vuelto a la versión" in (layout.updates_dir / "registro.txt").read_text(encoding="utf-8")
 
 
-def test_update_script_quotes_paths(layout, tmp_path):
-    script = updater.build_script(tmp_path / "a'b" / "setup.exe", tmp_path / "Programa", tmp_path / "Anterior", layout, 1234)
-    assert "'a''b'" not in script and "a''b" in script
-    assert "--verificar-actualizacion" in script and "--revertir-datos" in script and "/ACTUALIZACION=1" in script
+@pytest.mark.skipif(os.name == "nt", reason="usa guiones de shell como instalador y programa de prueba")
+@pytest.mark.parametrize("case", ["ok", "verify_fails", "installer_fails"])
+def test_apply_helper_installs_checks_and_reverts(layout, tmp_path, case):
+    """La copia del programa instala en silencio, comprueba la versión nueva y la abre; si algo falla, vuelve atrás."""
+    prog, prev = tmp_path / "Programa", tmp_path / "Programa anterior"
+    prog.mkdir()
+    calls = tmp_path / "llamadas.txt"
+    exe = updater._program_exe(prog)
+
+    def program(version, verify_code=0):
+        return (f"#!/bin/sh\necho {version} \"$@\" >> '{calls}'\n"
+                f"[ \"$1\" = --verificar-actualizacion ] && exit {verify_code}\nexit 0\n")
+    exe.write_text(program("vieja"))
+    exe.chmod(0o755)
+    shutil.copytree(prog, prev)
+    installer = tmp_path / "setup.sh"
+    new_exe = program("nueva", 1 if case == "verify_fails" else 0).replace("'", "'\\''")
+    installer.write_text("#!/bin/sh\n" + ("exit 3\n" if case == "installer_fails" else
+                         f"printf '%s' '{new_exe}' > '{exe}'\nchmod +x '{exe}'\nexit 0\n"))
+    installer.chmod(0o755)
+    updater.write_marker(layout, {"from": "1.0.0", "to": "9.9.9", "installer": str(installer),
+                                  "program_dir": str(prog), "previous_dir": str(prev), "pid": None})
+    rc = updater.apply_update_helper(layout, installer_args=[])
+    log = (layout.updates_dir / "registro.txt").read_text(encoding="utf-8")
+    time.sleep(0.5)                                    # el programa se abre por separado
+    seen = calls.read_text() if calls.exists() else ""
+    if case == "ok":
+        assert rc == 0 and "Abriendo la versión nueva" in log
+        assert "nueva --verificar-actualizacion" in seen and "\nnueva\n" in seen   # y se abre la versión nueva
+    else:
+        assert rc == 1 and "FALLO" in log and "vieja --revertir-datos" in seen
+        assert "vieja" in exe.read_text()              # el programa anterior vuelve a su sitio
+
+
+def test_relaunch_keeps_how_it_was_opened():
+    assert updater.relaunch_args(["--inicio", "--abrir", "x"]) == ["--inicio"]
+    assert updater.relaunch_args(["--sin-ventana", "--puerto-local", "8795"]) == ["--sin-ventana", "--puerto-local", "8795"]
+    assert updater.relaunch_args(["--puerto-local", "; del"]) == []
+
+
+def test_apply_helper_without_pending_update(layout):
+    assert updater.apply_update_helper(layout) == 1
 
 
 def test_private_repository_needs_token(layout, keys):
