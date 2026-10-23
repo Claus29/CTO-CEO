@@ -44,7 +44,7 @@ jobs:
           python tools/make_manifest.py dist/DEVCONTROL-Setup-2.2.99.exe --repo $env:GITHUB_REPOSITORY --notes "Versión de prueba"
           git checkout -- devcontrol/__init__.py
           Get-ChildItem dist | Format-Table Name, Length | Out-String | Write-Host
-      - name: Anfitrión (desde el código) que ofrece la versión nueva
+      - name: Anfitrión (desde el código) que ofrece la versión nueva y miembro que se actualiza solo
         shell: pwsh
         run: |
           $env:DEVCONTROL_HOME = "$env:RUNNER_TEMP\anfitrion"
@@ -59,9 +59,8 @@ jobs:
           for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; try { Invoke-RestMethod http://127.0.0.1:8765/api/update/manifest -TimeoutSec 2 | Out-Null; $ok = $true; break } catch {} }
           if (-not $ok) { Get-Content "$env:RUNNER_TEMP\anfitrion.err"; throw "El anfitrión no ofrece la versión nueva" }
           Write-Host "El anfitrión ofrece la versión 2.2.99."
-      - name: Instalar la versión actual como miembro y dejar que se actualice sola
-        shell: pwsh
-        run: |
+          Remove-Item Env:DEVCONTROL_HOME
+          # --- miembro (en el mismo paso: así el anfitrión sigue en marcha) ---
           $p = Start-Process -FilePath "dist\DEVCONTROL-Setup-$env:ACTUAL.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
           Write-Host "Instalación inicial: código $($p.ExitCode)"
           Set-Content -LiteralPath "$env:LOCALAPPDATA\DEV CONTROL\instalacion.ini" -Value "[instalacion]`r`nrol = miembro`r`nservidor = 127.0.0.1:8765`r`niniciar_con_windows = no`r`n" -Encoding UTF8
@@ -79,7 +78,7 @@ jobs:
           Write-Host "===== instalador.log ====="; $il = Join-Path $docs 'DEV CONTROL\Actualizaciones\instalador.log'; if (Test-Path $il) { Get-Content $il -Tail 40 }
           Write-Host "===== registros ====="; Get-ChildItem "$env:LOCALAPPDATA\DEV CONTROL\Registros" -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 30 }
           Write-Host "Versión instalada ahora: $((Get-Item $exe).VersionInfo.ProductVersion)"
-          if (-not $final) { throw "No se ha actualizado solo a la 2.2.99 o no ha vuelto a abrirse" }
+          if (-not $final) { Write-Host "===== anfitrión ====="; Get-Content "$env:RUNNER_TEMP\anfitrion.err" -Tail 30 -ErrorAction SilentlyContinue; throw "No se ha actualizado solo a la 2.2.99 o no ha vuelto a abrirse" }
           if (-not (Select-String -Path $reg -Pattern "OK: actualizado de $env:ACTUAL a 2.2.99" -Quiet)) { throw "Falta la comprobación de datos en el registro" }
           Write-Host "Se ha actualizado solo de $env:ACTUAL a 2.2.99 y ha vuelto a abrirse."
 
@@ -113,7 +112,7 @@ jobs:
           python tools/make_manifest.py dist/DEVCONTROL-Setup-2.2.99.exe --repo $env:GITHUB_REPOSITORY --notes "Versión de prueba"
           git checkout -- devcontrol/__init__.py
           Get-ChildItem dist | Format-Table Name, Length | Out-String | Write-Host
-      - name: Anfitrión con datos en la 2.1.1 (como el tuyo)
+      - name: Anfitrión con datos en la 2.1.1 (como el tuyo) e instalar la versión nueva encima a mano
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -126,16 +125,14 @@ jobs:
           Write-Host "En marcha: $($s.version) · anfitrión: $($s.is_host)"
           python tools/e2e_datos.py crear
           if ($LASTEXITCODE -ne 0) { throw "No se pudieron crear los datos" }
-      - name: Instalar a mano la versión nueva encima (con el programa abierto, como harás tú)
-        shell: pwsh
-        run: |
+          # --- instalar a mano la versión nueva encima, con el programa abierto (como harás tú) ---
           $p = Start-Process -FilePath "dist\DEVCONTROL-Setup-$env:ACTUAL.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$env:RUNNER_TEMP\manual.log`"") -Wait -PassThru
           Write-Host "Instalador: código $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\manual.log" -Tail 40; throw "El instalador falló" }
           Get-Content -LiteralPath "$env:LOCALAPPDATA\DEV CONTROL\instalacion.ini"
           Start-Sleep 3
           Get-Process | Where-Object { $_.ProcessName -match 'DEV CONTROL' } | Stop-Process -Force -ErrorAction SilentlyContinue
-      - name: GitHub de prueba con una versión más nueva y abrir la versión instalada
+      - name: GitHub de prueba con una versión más nueva; el anfitrión se actualiza solo
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\falso" | Out-Null
@@ -148,9 +145,7 @@ jobs:
           if ($s.version -ne $env:ACTUAL -or -not $s.is_host) { throw "La instalación a mano no dejó la versión $env:ACTUAL como anfitrión" }
           python tools/e2e_datos.py comprobar
           if ($LASTEXITCODE -ne 0) { throw "Se han perdido datos al instalar a mano" }
-      - name: El anfitrión se actualiza solo a la versión más nueva
-        shell: pwsh
-        run: |
+          # --- y ahora se actualiza solo a la versión más nueva (mismo paso: el GitHub de prueba sigue en marcha) ---
           $docs = [Environment]::GetFolderPath('MyDocuments')
           $reg = Join-Path $docs 'DEV CONTROL\Actualizaciones\registro.txt'
           $final = $null
