@@ -19,7 +19,7 @@ from .entities import find_entity
 from .web import bad_request
 
 COALESCE_SECONDS = 120
-FOLLOWABLE = {"task", "incident", "idea", "wiki", "decision", "project"}
+FOLLOWABLE = {"task", "incident", "idea", "wiki", "decision", "project", "user"}   # user: avisos de conexión
 TASK_SCOPES = {"proyecto": "Todas las tareas de mis proyectos", "mio": "Solo las mías y las que sigo"}
 CHANNEL_MODES = {"todo": "Todos los mensajes", "menciones": "Solo menciones y respuestas",
                  "silencio": "Silenciado (solo si te mencionan)"}
@@ -322,6 +322,10 @@ def register(router, app):
     app.watcher = watcher
 
     def check_visible(user, etype: str, eid: int) -> None:
+        if etype == "user":
+            if eid == user["id"] or not db.query_one("SELECT 1 FROM users WHERE id=? AND active=1", (eid,)):
+                raise bad_request("Elige a otra persona del equipo.")
+            return
         if etype == "project":
             from .common import check_project_access
             check_project_access(db, user, eid)
@@ -351,6 +355,13 @@ def register(router, app):
                           (req.user["id"], etype, eid))
             people = followers(c, etype, eid)
         return {"following": req.user["id"] in people, "count": len(people)}
+
+    @router.route("GET", "/api/follows/users")
+    def followed_users(req):
+        """Personas de las que quiero saber cuándo se conectan (también salen arriba, junto a «Conectado»)."""
+        rows = db.query("SELECT f.entity_id FROM follows f JOIN users u ON u.id=f.entity_id WHERE f.user_id=? "
+                        "AND f.entity_type='user' AND u.active=1 ORDER BY f.created_at", (req.user["id"],))
+        return {"user_ids": [r["entity_id"] for r in rows]}
 
     @router.route("GET", "/api/channels/{cid}/notify")
     def get_channel_mode(req, cid):
@@ -398,3 +409,54 @@ def register(router, app):
 
     app.notify_settings_save = save_settings
     app.notify_preset = apply_preset
+
+
+# -- avisos de conexión y desconexión ---------------------------------------------------------------------
+PRESENCE_GRACE = 90        # al arrancar el servidor todos se reconectan: eso no se avisa
+OFFLINE_CONFIRM = 30       # una desconexión solo se avisa si dura (los cortes breves de red no)
+
+
+class PresenceNotifier:
+    """Recibe cada pocos segundos quién está conectado y avisa a quien sigue a esa persona."""
+
+    def __init__(self, db, clock=None):
+        import time
+        self.db = db
+        self.clock = clock or time.monotonic
+        self.started = self.clock()
+        self.prev: set[int] = set()
+        self.ever_online: set[int] = set()
+        self.offline_since: dict[int, float] = {}
+        self.announced_offline: set[int] = set()
+
+    def _announce(self, uid: int, online: bool) -> None:
+        with self.db.tx() as c:
+            people = followers(c, "user", uid) - {uid}
+            if not people:
+                return
+            row = c.execute("SELECT display_name FROM users WHERE id=?", (uid,)).fetchone()
+            name = row[0] if row else "Alguien"
+            from datetime import datetime
+            hora = datetime.now().strftime("%H:%M")
+            push(self.db, c, people, "presence", f"{name} se ha {'conectado' if online else 'desconectado'}",
+                 f"{'En línea' if online else 'Desconectado'} desde las {hora}.", "presence", uid,
+                 dedupe=f"presence-{uid}-{'on' if online else 'off'}-{now_iso()}")
+
+    def update(self, online: set[int]) -> None:
+        now = self.clock()
+        in_grace = now - self.started < PRESENCE_GRACE
+        for uid in online - self.prev:
+            if uid in self.offline_since:              # volvió antes de darlo por desconectado: nada
+                del self.offline_since[uid]
+            elif uid in self.announced_offline or (uid not in self.ever_online and not in_grace):
+                self._announce(uid, True)
+            self.announced_offline.discard(uid)
+            self.ever_online.add(uid)
+        for uid in self.prev - online:
+            self.offline_since[uid] = now
+        for uid, since in list(self.offline_since.items()):
+            if now - since >= OFFLINE_CONFIRM:
+                del self.offline_since[uid]
+                self.announced_offline.add(uid)
+                self._announce(uid, False)
+        self.prev = set(online)

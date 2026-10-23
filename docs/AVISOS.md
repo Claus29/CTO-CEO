@@ -26,6 +26,7 @@ ha cambiado.
 | Ausencia de un compañero (al registrarla y el día antes) | Compañeros de sus proyectos |
 | Fechas del calendario (el día antes y el mismo día) | Quien ve la planificación del proyecto |
 | Tu rol cambia, te añaden a un proyecto, entran en tu cuenta desde un equipo nuevo | Tú |
+| Alguien que sigues **se conecta o se desconecta** (más de 30 s fuera) | Quien lo sigue |
 | Copia de seguridad fallida, poco espacio en disco, alguien quita su verificación en dos pasos | Administradores |
 
 Reglas que se cumplen siempre:
@@ -39,6 +40,13 @@ Reglas que se cumplen siempre:
 
 El botón **Seguir** está en cada tarea, incidencia y página de la wiki, y en «Tareas» puedes **seguir el proyecto
 entero** (útil para el CTO o el CEO). Quien crea, recibe, comenta o edita algo lo sigue automáticamente.
+
+## Quién está en línea
+
+Junto a «Conectado», arriba, salen las personas que sigues con un punto verde si están en línea. Se eligen con «+»
+(o «Ver en línea»), con la campana de cada persona en **Equipo** o en **Usuarios y roles**. Seguir a alguien también
+te avisa cuando se conecta o se desconecta (un corte breve de menos de 30 segundos no cuenta, y al reiniciar el
+anfitrión no se avisa de que todo el equipo vuelve a conectarse).
 
 ## Preferencias (Mi cuenta → Avisos)
 

@@ -190,3 +190,38 @@ def test_long_descriptions_up_to_500k(admin):
     code, err = admin.call("POST", "/api/tasks", {"uid": uuid.uuid4().hex, "title": "Demasiado", "project_id":
                                                   project_id(admin), "description": "x" * 500_001})
     assert code == 400 and "500000" in err["message"]
+
+
+def test_follow_people_and_presence_notices(admin, server):
+    """Aviso cuando alguien que sigues se conecta o se desconecta, sin avisos por cortes breves ni al arrancar."""
+    from devcontrol.server.watch import OFFLINE_CONFIRM, PRESENCE_GRACE, PresenceNotifier
+    luis, marta = team(admin)
+    julio = luis.get("/api/me")["user"]["id"]
+    admin.post("/api/follows", {"entity_type": "user", "entity_id": julio})
+    assert admin.get("/api/follows/users")["user_ids"] == [julio]
+    assert admin.call("POST", "/api/follows", {"entity_type": "user",
+                                               "entity_id": admin.get("/api/me")["user"]["id"]})[0] == 400
+    now = [0.0]
+    pn = PresenceNotifier(server.db, clock=lambda: now[0])
+    pn.update({julio})                              # al arrancar el servidor: no se avisa
+    assert notes(admin, type="presence") == []
+    now[0] = PRESENCE_GRACE + 10
+    pn.update(set())                                # se va…
+    now[0] += 10
+    pn.update({julio})                              # …y vuelve en 10 s: corte breve, sin avisos
+    assert notes(admin, type="presence") == []
+    pn.update(set())
+    now[0] += OFFLINE_CONFIRM + 1
+    pn.update(set())                                # sigue fuera: «se ha desconectado»
+    now[0] += 60
+    pn.update({julio})                              # vuelve: «se ha conectado»
+    titles = [n["title"] for n in sorted(notes(admin, type="presence"), key=lambda n: n["id"])]
+    assert titles == ["Luis se ha desconectado", "Luis se ha conectado"]
+    assert notes(marta, type="presence") == []      # Marta no lo sigue
+    # alguien que entra por primera vez después del arranque también avisa
+    marta_id = marta.get("/api/me")["user"]["id"]
+    admin.post("/api/follows", {"entity_type": "user", "entity_id": marta_id})
+    pn.update({julio, marta_id})
+    assert any(n["title"] == "Marta se ha conectado" for n in notes(admin, type="presence"))
+    admin.post("/api/follows", {"entity_type": "user", "entity_id": julio, "follow": False})
+    assert admin.get("/api/follows/users")["user_ids"] == [marta_id]

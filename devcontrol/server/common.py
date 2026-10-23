@@ -65,6 +65,7 @@ NOTIFICATION_TYPES = {
     "quality": "Builds nuevas y pruebas", "wiki": "Wiki y decisiones", "team_absence": "Ausencias del equipo",
     "calendar": "Fechas del calendario", "account": "Tu cuenta y tus proyectos",
     "server_health": "Estado del servidor (copias y espacio en disco)",
+    "presence": "Cuando se conecta o desconecta alguien que sigues",
 }
 
 # Agrupación para la pantalla de preferencias.
@@ -77,7 +78,7 @@ NOTIFICATION_AREAS = {
     "Chat y llamadas": ["message_new", "chat_reply", "call_incoming", "call_missed"],
     "Planificación": ["idea", "release", "calendar", "renewal"],
     "Calidad": ["quality", "store"],
-    "Equipo y conocimiento": ["standup", "team_absence", "wiki", "daily_summary", "weekly_summary"],
+    "Equipo y conocimiento": ["presence", "standup", "team_absence", "wiki", "daily_summary", "weekly_summary"],
     "Cuenta y sistema": ["account", "system", "server_health"],
 }
 # «Lo importante»: lo que te afecta directamente. «Solo lo mío»: lo que te toca hacer a ti.
@@ -86,10 +87,10 @@ NOTIFICATION_PRESETS = {
                    "incident_critical", "incident_reopened", "task_updated", "incident_updated", "status_changed",
                    "comment", "chat_reply", "call_incoming", "call_missed", "pending_digest", "due_soon", "sla",
                    "dependency_unblocked", "reminder", "account", "system", "server_health", "release",
-                   "incident_blocked", "message_new", "calendar"},
+                   "incident_blocked", "message_new", "calendar", "presence"},
     "solo_mio": {"assigned", "mention", "verify_request", "verified", "rejected", "verify_waiting",
                  "incident_reopened", "chat_reply", "call_incoming", "call_missed", "pending_digest", "due_soon",
-                 "sla", "dependency_unblocked", "reminder", "account", "system"},
+                 "sla", "dependency_unblocked", "reminder", "account", "system", "presence"},
 }
 
 # Descripciones de tareas, incidencias e ideas: hasta 500 000 caracteres (antes 20 000).

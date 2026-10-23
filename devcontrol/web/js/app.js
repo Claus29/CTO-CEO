@@ -1,13 +1,14 @@
 // Arranque de la interfaz: conexión, inicio de sesión, estructura y navegación.
 import { api, ApiError, emit, on, setServerKey } from './api.js';
 import {
-  avatar, busy, clear, debounce, emptyState, errorBox, field, fmtRelative, h, icon, loadJSON, loading, modal, mount,
+  avatar, busy, clear, debounce, emptyState, errorBox, field, fmtRelative, h, icon, loadJSON, loading, menuButton, modal, mount,
   openKey, saveJSON, toast, typeBadge,
 } from './ui.js';
 import {
-  can, canAny, entityHash, forgetSession, loadSession, openNotification, pollLocal, refreshCounters, setProject, startSync, stopSync, store,
+  can, canAny, entityHash, forgetSession, isWatched, loadSession, openNotification, pollLocal, refreshCounters, setProject, startSync,
+  stopSync, store, toggleWatch, userById,
 } from './state.js';
-import { callsAvailable, inCall, openCallsPanel, startCalls, stopCalls } from './calls.js';
+import { callsAvailable, inCall, openCallsPanel, startCall, startCalls, stopCalls } from './calls.js';
 
 const root = document.getElementById('app');
 
@@ -121,6 +122,7 @@ function buildShell() {
   const banner = h('div', { class: 'offline-banner hidden' });
   const obsolete = h('div', { class: 'obsolete-banner hidden', role: 'status' });
   const callsBtn = h('button', { class: 'btn ghost icon calls-btn hidden', title: 'Llamadas', onclick: openCallsPanel }, icon('phone'));
+  const watchBar = h('div', { class: 'watch-bar' });
   const me = h('div', { class: 'me' });
   const sidebar = h('aside', { class: 'sidebar' },
     h('a', { class: 'brand', href: '#/panel' }, h('span', { class: 'logo' }, 'DEV', h('b', null, ' CONTROL'))),
@@ -130,11 +132,11 @@ function buildShell() {
     title, h('div', { class: 'grow' }),
     projectSel,
     h('button', { class: 'search-btn', onclick: openPalette, title: 'Buscar (Ctrl+K)' }, icon('search', 15), h('span', null, 'Buscar…'), h('kbd', null, 'Ctrl K')),
-    timer, connPill, callsBtn, bell);
+    timer, watchBar, connPill, callsBtn, bell);
   const el = h('div', { class: 'app' }, sidebar, h('div', { class: 'main' }, top, obsolete, banner, content));
   mount(root, el);
-  shell = { nav, projectSel, connPill, bell, timer, title, content, banner, me, obsolete, callsBtn };
-  renderNav(); renderProjects(); renderMe(); renderConn(); renderCounters();
+  shell = { nav, projectSel, connPill, bell, timer, title, content, banner, me, obsolete, callsBtn, watchBar };
+  renderNav(); renderProjects(); renderMe(); renderConn(); renderCounters(); renderWatch();
 }
 
 function renderNav() {
@@ -193,6 +195,26 @@ function renderConn() {
       h('span', { class: 'muted' }, 'Puedes seguir trabajando: los cambios se guardan y se envían al reconectar.'));
     b.classList.remove('hidden');
   } else b.classList.add('hidden');
+}
+
+// Arriba, junto a «Conectado»: las personas que sigues, con punto verde si están en línea.
+function renderWatch() {
+  if (!shell) return;
+  const people = (store.watched || []).map(userById).filter(u => u && u.active !== 0);
+  const first = (u) => (u.display_name || '').split(' ')[0];
+  const seen = (u) => u.online ? 'En línea' : u.last_seen_at ? `Visto ${fmtRelative(u.last_seen_at)}` : 'Sin conectar todavía';
+  const chips = people.map(u => menuButton(h('span', { class: 'row', style: { gap: '6px' } }, avatar(u, !!u.online), h('span', { class: 'watch-name' }, first(u))), [
+    { label: `${u.display_name} · ${seen(u)}`, icon: u.online ? 'check' : 'clock', onClick: () => { location.hash = `#/equipo?persona=${u.id}`; } },
+    { label: 'Llamar', icon: 'phone', onClick: () => startCall([u.id], 'voz'), hidden: !callsAvailable() },
+    { label: 'Dejar de seguir (sin avisos ni aquí arriba)', icon: 'eyeoff', onClick: () => toggleWatch(u.id, false).catch(err => toast(err.message, 'error')) },
+  ], { class: 'watch-chip' + (u.online ? ' on' : ''), title: `${u.display_name} · ${seen(u)}` }));
+  const others = store.users.filter(u => u.id !== store.me?.id && u.active !== 0 && !isWatched(u.id));
+  const add = others.length ? menuButton(h('span', { class: 'row', style: { gap: '4px' } }, icon(people.length ? 'plus' : 'eye', 14), people.length ? null : h('span', { class: 'watch-name' }, 'Ver en línea')),
+    others.map(u => ({ label: `${u.display_name}${u.online ? ' · en línea' : ''}`, icon: 'user', onClick: () => toggleWatch(u.id, true)
+      .then(() => toast(`Verás aquí cuándo está en línea ${u.display_name} y te avisaremos cuando se conecte o se desconecte.`, 'ok'))
+      .catch(err => toast(err.message, 'error')) })),
+    { class: 'btn ghost sm watch-add', title: 'Ver aquí cuándo está en línea alguien del equipo (y recibir un aviso cuando se conecte o se desconecte)' }) : null;
+  mount(shell.watchBar, chips, add);
 }
 
 function renderCounters() {
@@ -432,7 +454,8 @@ function renderCallsBtn() {
   shell.callsBtn.classList.toggle('active-call', inCall());
 }
 on('counters', renderCounters);
-on('presence', () => {});
+on('presence', renderWatch);
+on('watched', renderWatch);
 on('project', () => { renderProjects(); route(); });
 on('me', () => { renderNav(); renderProjects(); renderMe(); });
 on('changes', (d) => { if (d.kinds.has('time')) renderTimer(); });

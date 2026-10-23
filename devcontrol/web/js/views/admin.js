@@ -5,6 +5,7 @@ import {
   avatar, busy, confirmDialog, emptyState, errorBox, field, fmtDateTime, fmtRelative, h, icon, loading, menuButton, modal,
   mount, pageHead, selectEl, tabs, table, toast, uid,
 } from '../ui.js';
+import { watchUserButton } from './shared.js';
 
 const TABS = [
   { key: 'usuarios', label: 'Usuarios', icon: 'users', perm: 'sistema.usuarios' },
@@ -144,7 +145,8 @@ async function usersTab(root, ctx) {
           : h('span', { class: 'small', title: u.last_login_at ? `Último inicio de sesión: ${fmtDateTime(u.last_login_at)}` : '' },
             u.last_seen_at ? fmtRelative(u.last_seen_at) : (u.last_login_at ? fmtRelative(u.last_login_at) : 'Nunca')) },
         { label: 'Sesiones', cls: 'hide-sm', render: u => h('span', { class: 'small' }, u.sessions || '0') },
-        { label: '', render: u => h('div', { class: 'row end', onclick: e => e.stopPropagation() }, menuButton('Acciones', [
+        { label: '', render: u => h('div', { class: 'row end', onclick: e => e.stopPropagation() },
+          u.id !== store.me.id && u.active ? watchUserButton(u.id, { compact: true }) : null, menuButton('Acciones', [
           { label: 'Editar', icon: 'edit', onClick: () => editUser(u) },
           { label: 'Restablecer contraseña', icon: 'key', onClick: () => resetPassword(u) },
           { label: 'Cerrar todas sus sesiones', icon: 'logout', onClick: () => logoutAll(u), hidden: !u.sessions },

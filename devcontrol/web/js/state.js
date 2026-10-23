@@ -69,6 +69,7 @@ export async function loadSession() {
   if (store.gate) return;
   store.users = (await api.get('/api/users')).items;
   try { store.prefs = await api.get('/api/notifications/prefs'); } catch { store.prefs = null; }
+  await loadWatched();
   await refreshCounters();
   lastNotifId = loadJSON(`dc.lastNotif.${store.me.id}`, 0);
   const latest = await api.get('/api/notifications?limit=1').catch(() => null);
@@ -92,6 +93,18 @@ export async function refreshCounters() {
     }
     emit('counters');
   } catch { /* sin conexión */ }
+}
+
+// -- personas que sigo (aviso al conectarse/desconectarse y punto verde arriba, junto a «Conectado») --
+export const isWatched = (uid) => (store.watched || []).includes(uid);
+export async function loadWatched() {
+  try { store.watched = (await api.get('/api/follows/users')).user_ids || []; } catch { store.watched = store.watched || []; }
+  emit('watched');
+}
+export async function toggleWatch(uid, follow = !isWatched(uid)) {
+  await api.post('/api/follows', { entity_type: 'user', entity_id: uid, follow });
+  await loadWatched();
+  return follow;
 }
 
 export async function refreshUsers() {
@@ -287,6 +300,7 @@ export function entityHash(type, id, key) {
     case 'goal': return '#/semana';
     case 'user': return '#/cuenta';
     case 'project': return '#/tareas';
+    case 'presence': return '#/equipo';
     default: return '#/panel';
   }
 }

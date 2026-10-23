@@ -2,6 +2,17 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.3.0] - 2026-10-23
+
+- **Saber quién está en línea**: arriba, junto a «Conectado», aparecen las personas que elijas (por ejemplo, Julio) con
+  un punto verde si están conectadas. Con «+» (o «Ver en línea») añades a quien quieras; al pulsar a una persona puedes
+  llamarla, ver su ficha en Equipo o dejar de seguirla.
+- **Aviso cuando alguien se conecta o se desconecta**: botón de la campana junto a cada persona en Equipo y en Usuarios
+  y roles (y desde la barra de arriba). Llega como aviso de Windows aunque DEV CONTROL esté en la bandeja.
+- Sin avisos falsos: un corte de red breve (menos de 30 segundos) no se avisa, y cuando el anfitrión se reinicia o se
+  actualiza no llegan avisos de que «se ha conectado» todo el equipo.
+- Se puede desactivar en Mi cuenta → Avisos («Cuando se conecta o desconecta alguien que sigues»).
+
 ## [2.2.1] - 2026-10-23
 
 - **Arreglo importante de las actualizaciones**: al pulsar «Actualizar ahora» el programa se cerraba pero la versión

@@ -8,7 +8,7 @@
 // se recargan solas cuando el servidor avisa de cambios en ese elemento) y title (null para ocultar la cabecera).
 import { api, on } from '../api.js';
 import { INCIDENT_STATUSES, RESOLUTION_STATES, TASK_STATUSES } from '../labels.js';
-import { can, canAny, entityHash, store, userById, userName } from '../state.js';
+import { can, canAny, entityHash, isWatched, store, toggleWatch, userById, userName } from '../state.js';
 import {
   avatar, busy, clearDraft, bindDraft, confirmDialog, debounce, emptyState, field, fmtDate, fmtDateTime, fmtDuration,
   fmtRelative, fmtSize, h, icon, lightbox, mount, modal, promptDialog, richText, statusBadge, toast, todayISO, typeBadge, uid,
@@ -35,6 +35,24 @@ export function followButton(entityType, entityId, { label = 'Seguir', compact =
   }).catch(() => {});
   paint();
   api.get(`/api/follows?entity_type=${entityType}&entity_id=${entityId}`).then((s) => { state = s; paint(); }).catch(() => {});
+  return btn;
+}
+
+// ---------- avisarme cuando alguien se conecte o se desconecte ----------
+export function watchUserButton(uid, { compact = false } = {}) {
+  const btn = h('button', { class: 'btn sm ghost follow-btn', type: 'button' });
+  const paint = () => {
+    const onIt = isWatched(uid);
+    btn.classList.toggle('on', onIt);
+    btn.title = onIt ? 'Te avisamos cuando se conecte o se desconecte y lo ves arriba, junto a «Conectado». Pulsa para dejarlo.'
+      : 'Avisarme cuando se conecte o se desconecte (y verlo arriba, junto a «Conectado»)';
+    mount(btn, icon(onIt ? 'bell' : 'eye', 14), compact ? null : (onIt ? 'Te avisamos' : 'Avisarme al conectarse'));
+  };
+  btn.onclick = () => busy(btn, () => toggleWatch(uid)).then((follow) => {
+    paint();
+    toast(follow ? `Te avisaremos cuando ${userName(uid)} se conecte o se desconecte.` : `Ya no sigues a ${userName(uid)}.`, 'ok');
+  }).catch(() => {});
+  paint();
   return btn;
 }
 

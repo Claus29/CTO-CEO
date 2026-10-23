@@ -7,6 +7,7 @@ import {
   fmtRelative, h, icon, loading, modal, mondayOf, mount, pageHead, richText, selectEl, statusBadge, table, tabs, toast,
   todayISO, typeBadge, uid,
 } from '../ui.js';
+import { watchUserButton } from './shared.js';
 
 const TAB_DEFS = [
   { key: 'ahora', label: 'Ahora', icon: 'activity', allowed: () => canAny('actividad.ver_propia', 'actividad.ver_todos') },
@@ -63,6 +64,7 @@ async function nowTab({ ctx, body, persona }) {
           h('div', { class: 'grow' }, h('b', null, p.user_name),
             h('div', { class: 'tiny muted' }, p.online ? 'En línea' : p.last_seen_at ? `Visto ${fmtRelative(p.last_seen_at)}` : 'Aún no se ha conectado', u.role_label ? ` · ${u.role_label}` : '')),
           h('span', { class: 'tiny muted', title: 'Tiempo registrado hoy' }, icon('clock', 13), ' ', fmtDuration(p.today_seconds || 0), ' hoy'),
+          p.user_id !== store.me?.id ? watchUserButton(p.user_id, { compact: true }) : null,
           callButtons({ userId: p.user_id })),
         p.timer ? h('div', { class: 'callout ok row mt' }, icon('play', 14),
           h('div', { class: 'grow ellipsis' }, 'Cronómetro en marcha: ', h('a', { href: entityHash(p.timer.entity_type, p.timer.entity_id, p.timer.key) }, p.timer.key || ''),

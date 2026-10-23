@@ -143,6 +143,8 @@ class ServerApp:
         self.perms = auth.PermissionCache(self.db)
         self.attachments = AttachmentStore(self)
         self.jobs = NotificationJobs(self)
+        from .watch import PresenceNotifier
+        self.presence_notifier = PresenceNotifier(self.db)
         self.recovery = None
         self.router = Router()
         self._register_core()
@@ -923,6 +925,7 @@ class ServerApp:
                                 c.execute("UPDATE users SET last_seen_at=? WHERE id=?",
                                           (self.presence.last_seen_iso(uid), uid))
                     known_online = online
+                self.presence_notifier.update(online)
                 now = time.monotonic()
                 if now - last_addr >= 60:
                     last_addr = now
