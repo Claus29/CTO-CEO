@@ -389,7 +389,9 @@ class Updater:
         return f"GitHub respondió {exc.code}."
 
     def _check_github(self):
-        rel = json.loads(self.http_get(f"https://api.github.com/repos/{self.repo}/releases/latest",
+        # DEVCONTROL_GITHUB_API solo lo usan las pruebas reales (un GitHub de mentira en el propio equipo).
+        api = os.environ.get("DEVCONTROL_GITHUB_API", "https://api.github.com").rstrip("/")
+        rel = json.loads(self.http_get(f"{api}/repos/{self.repo}/releases/latest",
                                        self._gh_headers()))
         assets = {a.get("name"): a.get("url") for a in rel.get("assets", [])}
         if MANIFEST not in assets or SIGNATURE not in assets:

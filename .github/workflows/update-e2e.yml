@@ -83,6 +83,91 @@ jobs:
           if (-not (Select-String -Path $reg -Pattern "OK: actualizado de $env:ACTUAL a 2.2.99" -Quiet)) { throw "Falta la comprobación de datos en el registro" }
           Write-Host "Se ha actualizado solo de $env:ACTUAL a 2.2.99 y ha vuelto a abrirse."
 
+  anfitrion:
+    # Tu caso: el anfitrión con datos en la 2.1.1 → instalas la versión nueva a mano encima → a partir de ahí se
+    # actualiza solo (con copia previa y comprobación de datos) cuando se publica otra.
+    if: inputs.desde == 'compilada'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencias
+        run: python -m pip install -r requirements-windows.txt
+      - name: Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Compilar la versión actual y una versión nueva de prueba (firmada)
+        shell: pwsh
+        env:
+          DEVCONTROL_SIGNING_KEY: ${{ secrets.DEVCONTROL_SIGNING_KEY }}
+          PYTHONUTF8: "1"
+        run: |
+          python tools/build_windows.py
+          $actual = python -c "import devcontrol; print(devcontrol.APP_VERSION)"
+          "ACTUAL=$actual" | Out-File -Append $env:GITHUB_ENV
+          (Get-Content devcontrol\__init__.py) -replace 'APP_VERSION = "[^"]+"', 'APP_VERSION = "2.2.99"' | Set-Content devcontrol\__init__.py
+          python tools/build_windows.py
+          python tools/make_manifest.py dist/DEVCONTROL-Setup-2.2.99.exe --repo $env:GITHUB_REPOSITORY --notes "Versión de prueba"
+          git checkout -- devcontrol/__init__.py
+          Get-ChildItem dist | Format-Table Name, Length | Out-String | Write-Host
+      - name: Anfitrión con datos en la 2.1.1 (como el tuyo)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v2.1.1 --repo $env:GITHUB_REPOSITORY --pattern "DEVCONTROL-Setup-*.exe" --dir "$env:RUNNER_TEMP\v211"
+          $p = Start-Process -FilePath "$env:RUNNER_TEMP\v211\DEVCONTROL-Setup-2.1.1.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          Set-Content -LiteralPath "$env:LOCALAPPDATA\DEV CONTROL\instalacion.ini" -Value "[instalacion]`r`nrol = anfitrion`r`niniciar_con_windows = no`r`n" -Encoding UTF8
+          Start-Process -FilePath "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe" -ArgumentList '--sin-ventana'
+          for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; try { $s = Invoke-RestMethod http://127.0.0.1:8770/local/status -TimeoutSec 2; if ($s.reachable) { break } } catch {} }
+          Write-Host "En marcha: $($s.version) · anfitrión: $($s.is_host)"
+          python tools/e2e_datos.py crear
+          if ($LASTEXITCODE -ne 0) { throw "No se pudieron crear los datos" }
+      - name: Instalar a mano la versión nueva encima (con el programa abierto, como harás tú)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\DEVCONTROL-Setup-$env:ACTUAL.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$env:RUNNER_TEMP\manual.log`"") -Wait -PassThru
+          Write-Host "Instalador: código $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\manual.log" -Tail 40; throw "El instalador falló" }
+          Get-Content -LiteralPath "$env:LOCALAPPDATA\DEV CONTROL\instalacion.ini"
+          Start-Sleep 3
+          Get-Process | Where-Object { $_.ProcessName -match 'DEV CONTROL' } | Stop-Process -Force -ErrorAction SilentlyContinue
+      - name: GitHub de prueba con una versión más nueva y abrir la versión instalada
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\falso" | Out-Null
+          Copy-Item dist\manifest.json, dist\manifest.json.sig, dist\DEVCONTROL-Setup-2.2.99.exe "$env:RUNNER_TEMP\falso"
+          Start-Process python -ArgumentList @('tools\fake_github.py', '8899', "$env:RUNNER_TEMP\falso") -RedirectStandardOutput "$env:RUNNER_TEMP\falso.log" -RedirectStandardError "$env:RUNNER_TEMP\falso.err"
+          $env:DEVCONTROL_GITHUB_API = 'http://127.0.0.1:8899'
+          Start-Process -FilePath "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe" -ArgumentList '--sin-ventana'
+          for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; try { $s = Invoke-RestMethod http://127.0.0.1:8770/local/status -TimeoutSec 2; if ($s.reachable) { break } } catch {} }
+          Write-Host "Tras instalar a mano: versión $($s.version) · anfitrión: $($s.is_host)"
+          if ($s.version -ne $env:ACTUAL -or -not $s.is_host) { throw "La instalación a mano no dejó la versión $env:ACTUAL como anfitrión" }
+          python tools/e2e_datos.py comprobar
+          if ($LASTEXITCODE -ne 0) { throw "Se han perdido datos al instalar a mano" }
+      - name: El anfitrión se actualiza solo a la versión más nueva
+        shell: pwsh
+        run: |
+          $docs = [Environment]::GetFolderPath('MyDocuments')
+          $reg = Join-Path $docs 'DEV CONTROL\Actualizaciones\registro.txt'
+          $final = $null
+          for ($i = 0; $i -lt 150; $i++) {
+            Start-Sleep 3
+            try { $s = Invoke-RestMethod http://127.0.0.1:8770/local/status -TimeoutSec 2; if ($i % 10 -eq 0) { Write-Host "$(Get-Date -Format HH:mm:ss) versión $($s.version) · $($s.update.state) $($s.update.auto_in) $($s.update.error)" }; if ($s.version -eq '2.2.99' -and $s.reachable) { $final = $s; break } } catch {}
+          }
+          Write-Host "===== registro.txt ====="; if (Test-Path $reg) { Get-Content $reg }
+          Write-Host "===== GitHub de prueba ====="; Get-Content "$env:RUNNER_TEMP\falso.log" -ErrorAction SilentlyContinue
+          Write-Host "===== copias ====="; Get-ChildItem (Join-Path $docs 'DEV CONTROL\Copias de seguridad') -ErrorAction SilentlyContinue | Format-Table Name, Length | Out-String | Write-Host
+          Write-Host "===== registros ====="; Get-ChildItem "$env:LOCALAPPDATA\DEV CONTROL\Registros" -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 25 }
+          if (-not $final) { throw "El anfitrión no se ha actualizado solo o no ha vuelto a abrirse" }
+          if (-not (Select-String -Path $reg -Pattern "OK: actualizado de $env:ACTUAL a 2.2.99 correctamente. Datos comprobados" -Quiet)) { throw "Falta la comprobación de datos" }
+          python tools/e2e_datos.py comprobar
+          if ($LASTEXITCODE -ne 0) { throw "Se han perdido datos al actualizarse solo" }
+          Write-Host "El anfitrión se ha actualizado solo de $env:ACTUAL a 2.2.99, con copia previa y sin perder datos."
+
   actualizar:
     if: inputs.desde != 'compilada'
     runs-on: windows-latest
