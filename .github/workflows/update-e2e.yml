@@ -1,0 +1,75 @@
+name: Prueba real de actualización
+
+# Instala una versión publicada en un Windows de verdad, le pide que se actualice como lo haría un usuario
+# (Comprobar ahora → Instalar actualización) y comprueba que acaba en la versión nueva y vuelve a abrirse.
+on:
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: "Versión instalada al empezar (etiqueta publicada, p. ej. v2.1.1)"
+        default: "v2.1.1"
+
+permissions:
+  contents: read
+
+jobs:
+  actualizar:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Descargar e instalar la versión de partida
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESDE: ${{ inputs.desde }}
+        run: |
+          gh release download $env:DESDE --repo $env:GITHUB_REPOSITORY --pattern "DEVCONTROL-Setup-*.exe" --dir "$env:RUNNER_TEMP\inst"
+          $setup = Get-ChildItem "$env:RUNNER_TEMP\inst\DEVCONTROL-Setup-*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$env:RUNNER_TEMP\inst\primera.log`"") -Wait -PassThru
+          Write-Host "Instalador de partida: código $($p.ExitCode)"
+          $exe = "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe"
+          if (-not (Test-Path $exe)) { Get-Content "$env:RUNNER_TEMP\inst\primera.log" -Tail 60; throw "No se instaló" }
+          (Get-Item $exe).VersionInfo | Format-List FileVersion, ProductVersion
+          Get-ChildItem "$env:LOCALAPPDATA\DEV CONTROL" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | Out-String | Write-Host
+
+      - name: Abrir el programa y pedir la actualización
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe"
+          Start-Process -FilePath $exe -ArgumentList '--sin-ventana'
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; try { $s = Invoke-RestMethod http://127.0.0.1:8770/local/status -TimeoutSec 2; $ok = $true; break } catch {} }
+          if (-not $ok) { throw "El programa no arrancó" }
+          Write-Host "Versión en marcha: $($s.version) (anfitrión: $($s.is_host))"
+          $h = @{ 'Content-Type' = 'application/json' }
+          Invoke-RestMethod -Method Post http://127.0.0.1:8770/local/update/check -Headers $h -Body '{}' | Out-Null
+          for ($i = 0; $i -lt 60; $i++) { Start-Sleep 2; $u = Invoke-RestMethod http://127.0.0.1:8770/local/update; if ($u.state -ne 'checking' -and $u.latest) { break } }
+          $u | ConvertTo-Json -Depth 4 | Write-Host
+          if (-not $u.can_apply) { throw "No se puede instalar: $($u.error) $($u.reason)" }
+          try { Invoke-RestMethod -Method Post http://127.0.0.1:8770/local/update/apply -Headers $h -Body '{}' | ConvertTo-Json | Write-Host } catch { Write-Host "apply: $_" }
+
+      - name: Esperar a que termine y comprobar
+        shell: pwsh
+        run: |
+          $docs = [Environment]::GetFolderPath('MyDocuments')
+          $reg = Join-Path $docs 'DEV CONTROL\Actualizaciones\registro.txt'
+          $exe = "$env:LOCALAPPDATA\Programs\DEV CONTROL\DEV CONTROL.exe"
+          $done = $false
+          for ($i = 0; $i -lt 120; $i++) {
+            Start-Sleep 2
+            if ((Test-Path $reg) -and (Select-String -Path $reg -Pattern 'OK: actualizado|FALLO|ha fallado|Se ha vuelto' -Quiet)) { $done = $true; break }
+          }
+          Start-Sleep 10
+          Write-Host "===== registro.txt ====="; if (Test-Path $reg) { Get-Content $reg }
+          Write-Host "===== instalador.log (final) ====="; $il = Join-Path $docs 'DEV CONTROL\Actualizaciones\instalador.log'; if (Test-Path $il) { Get-Content $il -Tail 80 }
+          Write-Host "===== carpeta Actualizaciones ====="; Get-ChildItem (Join-Path $docs 'DEV CONTROL\Actualizaciones') | Format-Table Name, Length, LastWriteTime | Out-String | Write-Host
+          Write-Host "===== guion ====="; $ps = Join-Path $docs 'DEV CONTROL\Actualizaciones\aplicar_actualizacion.ps1'; if (Test-Path $ps) { Get-Content $ps }
+          Write-Host "===== registros del programa ====="; Get-ChildItem "$env:LOCALAPPDATA\DEV CONTROL" -Recurse -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName -Tail 40 }
+          Write-Host "===== procesos ====="; Get-Process | Where-Object { $_.ProcessName -match 'DEV CONTROL|powershell|DEVCONTROL' } | Format-Table Id, ProcessName, StartTime | Out-String | Write-Host
+          $ver = (Get-Item $exe).VersionInfo.ProductVersion
+          Write-Host "Versión instalada ahora: $ver"
+          $running = $false
+          try { $s = Invoke-RestMethod http://127.0.0.1:8770/local/status -TimeoutSec 3; $running = $true; Write-Host "Programa abierto de nuevo: $($s.version)" } catch { Write-Host "El programa no se ha vuelto a abrir." }
+          if (-not $done) { throw "La actualización no terminó (ni bien ni mal) en 4 minutos" }
+          if (-not (Select-String -Path $reg -Pattern 'OK: actualizado' -Quiet)) { throw "La actualización falló (ver registro)" }
+          if (-not $running) { throw "Se actualizó pero el programa no volvió a abrirse" }
