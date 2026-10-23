@@ -11,7 +11,16 @@ permissions:
   contents: write
 
 jobs:
+  prueba-actualizacion:
+    # Antes de publicar: en un Windows real, la versión nueva tiene que actualizarse sola (miembro y anfitrión con
+    # datos) y volver a abrirse. Si no, no se publica.
+    uses: ./.github/workflows/update-e2e.yml
+    with:
+      desde: compilada
+    secrets: inherit
+
   publicar:
+    needs: prueba-actualizacion
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
