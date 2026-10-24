@@ -485,6 +485,53 @@ def register(router, app):
             new = dict(c.execute("SELECT * FROM tasks WHERE id=?", (row["id"],)).fetchone())
             return {"item": app.ser_task(new)}
 
+    @router.route("DELETE", "/api/tasks/{tid}", perm="tareas.ver", idempotent=True)
+    def delete_task(req, tid):
+        """Elimina la tarea por completo: comentarios, adjuntos, tiempo, dependencias, enlaces, avisos y búsqueda.
+        Queda una línea en el historial de actividad (y la tarea sigue en las copias de seguridad anteriores)."""
+        user = req.user
+        files = []
+        with db.tx() as c:
+            row = find_entity(db, user, "task", tid)
+            if not (auth.has_perm(user, "tareas.eliminar") or row["created_by"] == user["id"]):
+                raise forbidden("Solo quien creó la tarea o quien tiene permiso para eliminar tareas puede eliminarla.")
+            key, task_id = row["key"], row["id"]
+            # Aviso a quien trabajaba en ella o la seguía (sin enlace: la tarea deja de existir).
+            from .watch import followers, push
+            people = {row["created_by"], row["assignee_id"]} | followers(c, "task", task_id)
+            push(db, c, people, "task_updated", f"{key} eliminada",
+                 f"{user['display_name']} ha eliminado «{row['title']}».", None, None, actor_id=user["id"],
+                 dedupe=f"task-deleted-{task_id}")
+            comment_ids = [r[0] for r in c.execute("SELECT id FROM comments WHERE entity_type='task' AND entity_id=?",
+                                                   (task_id,))]
+            owners = [("task", task_id)] + [("comment", cid) for cid in comment_ids]
+            for otype, oid in owners:
+                files += [r[0] for r in c.execute("SELECT stored_name FROM attachments WHERE owner_type=? AND "
+                                                  "owner_id=?", (otype, oid))]
+                c.execute("DELETE FROM attachments WHERE owner_type=? AND owner_id=?", (otype, oid))
+            for table, col in (("comments", "entity"), ("edits", "entity"), ("resolutions", "entity"),
+                               ("time_entries", "entity"), ("code_links", "entity"), ("follows", "entity")):
+                c.execute(f"DELETE FROM {table} WHERE {col}_type='task' AND {col}_id=?", (task_id,))
+            c.execute("DELETE FROM dependencies WHERE (blocker_type='task' AND blocker_id=?) OR "
+                      "(blocked_type='task' AND blocked_id=?)", (task_id, task_id))
+            c.execute("DELETE FROM links WHERE (from_type='task' AND from_id=?) OR (to_type='task' AND to_id=?)",
+                      (task_id, task_id))
+            c.execute("DELETE FROM notifications WHERE entity_type='task' AND entity_id=?", (task_id,))
+            c.execute("UPDATE ideas SET task_id=NULL WHERE task_id=?", (task_id,))
+            c.execute("UPDATE store_submissions SET task_id=NULL WHERE task_id=?", (task_id,))
+            c.execute("UPDATE tasks SET recurrence_parent_id=NULL WHERE recurrence_parent_id=?", (task_id,))
+            db.unindex(c, "task", task_id)
+            c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+            log_activity(db, c, user, "task", None, key, "deleted", f"Eliminó la tarea {key}: {row['title']}",
+                         project_id=row["project_id"])
+            db.emit(c, "task", "task", task_id, actor_id=user["id"])
+        for stored in files:   # los archivos, una vez confirmado el borrado en la base de datos
+            try:
+                app.attachments.path_for(stored).unlink()
+            except OSError:
+                pass
+        return {"ok": True, "deleted": key}
+
     # -- ideas (con votos) --------------------------------------------------------------
     def ser_idea(r, un, vn, votes, my_votes, pm):
         r = dict(r)

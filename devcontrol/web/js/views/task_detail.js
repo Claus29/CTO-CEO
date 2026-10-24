@@ -88,6 +88,7 @@ export default async function render(ctx) {
       { label: 'Actualizar el motivo del bloqueo', icon: 'lock', onClick: blockReasonDialog, hidden: !work() || st !== 'bloqueada' },
       { label: 'Asignármela', icon: 'user', onClick: () => save({ assignee_id: me() }, `Te has asignado ${item.key}.`), hidden: !work() || item.assignee_id === me() || st === 'resuelto' },
       { label: 'Copiar la clave', icon: 'copy', onClick: () => navigator.clipboard?.writeText(item.key).then(() => toast(`${item.key} copiada.`, 'ok')).catch(() => toast(item.key, 'info')) },
+      { label: 'Eliminar la tarea…', icon: 'trash', danger: true, onClick: deleteTask, hidden: !(can('tareas.eliminar') || item.created_by === me()) },
     ], { class: 'btn' });
     const h1 = h('h1', { class: touch() ? 'editable' : '', title: touch() ? 'Haz clic para cambiar el título' : '' }, item.title);
     if (touch()) h1.addEventListener('click', () => editTitle(h1));
@@ -103,6 +104,19 @@ export default async function render(ctx) {
           item.recurrence ? h('span', { class: 'badge neutral', title: 'Tarea que se repite' }, icon('repeat', 12), recurrenceText(item.recurrence)) : null,
           (item.labels_list || []).map(l => h('a', { class: 'lbl-chip', href: `#/tareas?label=${encodeURIComponent(l)}` }, l)))),
       h('div', { class: 'actions' }, followButton('task', item.id), actions, more)));
+  }
+
+  async function deleteTask() {
+    const ok = await confirmDialog({
+      title: `Eliminar ${item.key}`, danger: true, confirmLabel: 'Eliminar definitivamente',
+      message: `Se eliminará «${item.title}» por completo: sus comentarios, adjuntos, tiempo registrado, dependencias y enlaces.\n\nNo se puede deshacer desde el programa (sí está en las copias de seguridad anteriores).`,
+    });
+    if (!ok) return;
+    try {
+      await api.del(`/api/tasks/${item.id}`);
+      toast(`${item.key} eliminada.`, 'ok');
+      location.hash = '#/tareas';
+    } catch (err) { toast(err.message, 'error'); }
   }
 
   function blockReasonDialog() {

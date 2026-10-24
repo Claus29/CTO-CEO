@@ -225,3 +225,26 @@ def test_follow_people_and_presence_notices(admin, server):
     assert any(n["title"] == "Marta se ha conectado" for n in notes(admin, type="presence"))
     admin.post("/api/follows", {"entity_type": "user", "entity_id": julio, "follow": False})
     assert admin.get("/api/follows/users")["user_ids"] == [marta_id]
+
+
+def test_delete_task_completely(admin, server):
+    """Eliminar una tarea la borra con todo lo suyo; solo quien la creó o quien tiene permiso puede hacerlo."""
+    luis, marta = team(admin)
+    me_marta = marta.get("/api/me")["user"]["id"]
+    t = new_task(admin, assignee_id=me_marta)
+    other = new_task(admin, title="Otra")
+    admin.post("/api/comments", {"uid": uuid.uuid4().hex, "entity_type": "task", "entity_id": t["id"], "body": "Hola"})
+    admin.post("/api/dependencies", {"blocker_type": "task", "blocker": t["key"], "blocked_type": "task",
+                                     "blocked": other["key"]})
+    assert luis.call("DELETE", f"/api/tasks/{t['id']}")[0] == 403            # ni la creó ni tiene permiso
+    assert admin.ok("DELETE", f"/api/tasks/{t['id']}")["deleted"] == t["key"]
+    assert admin.call("GET", f"/api/tasks/{t['id']}")[0] == 404
+    with server.db.tx() as c:
+        for sql in ("SELECT COUNT(*) FROM comments WHERE entity_type='task' AND entity_id=?",
+                    "SELECT COUNT(*) FROM dependencies WHERE blocker_type='task' AND blocker_id=?",
+                    "SELECT COUNT(*) FROM search_index WHERE kind='task' AND ref_id=?"):
+            assert c.execute(sql, (t["id"],)).fetchone()[0] == 0
+    assert any("eliminada" in n["title"] for n in notes(marta))              # la responsable se entera
+    assert admin.get(f"/api/tasks/{other['id']}")["item"]["key"] == other["key"]   # las demás siguen
+    own = new_task(luis)                                                    # cada uno puede borrar las suyas
+    assert luis.ok("DELETE", f"/api/tasks/{own['id']}")["deleted"] == own["key"]

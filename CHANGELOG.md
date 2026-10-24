@@ -2,6 +2,14 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.4.0] - 2026-10-24
+
+- **Eliminar tareas por completo**: en la tarea, «Más» → «Eliminar la tarea…». Se borra con sus comentarios, adjuntos,
+  tiempo registrado, dependencias, enlaces y avisos (pide confirmación; queda anotado en la actividad y la tarea sigue
+  en las copias de seguridad anteriores). Puede hacerlo quien creó la tarea, el administrador y el CTO (permiso nuevo
+  «Eliminar definitivamente cualquier tarea», que se puede dar a otros roles en Usuarios y roles).
+- Quien tenía la tarea asignada o la seguía recibe un aviso de que se ha eliminado.
+
 ## [2.3.0] - 2026-10-23
 
 - **Saber quién está en línea**: arriba, junto a «Conectado», aparecen las personas que elijas (por ejemplo, Julio) con

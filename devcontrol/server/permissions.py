@@ -23,6 +23,7 @@ CATALOG: list[tuple[str, str, str]] = [
     ("tareas.trabajar", "Tareas", "Trabajar en tareas y moverlas en el tablero"),
     ("tareas.verificar_todas", "Tareas", "Verificar o rechazar cualquier tarea, no solo las creadas"),
     ("tareas.asignar", "Tareas", "Asignar tareas a otras personas"),
+    ("tareas.eliminar", "Tareas", "Eliminar definitivamente cualquier tarea (cada uno puede eliminar las que creó)"),
     ("planificacion.ver", "Planificación", "Ver ideas, plan semanal, versiones, roadmap, calendario y renovaciones"),
     ("planificacion.editar", "Planificación", "Editar la planificación"),
     ("calidad.ver", "Calidad", "Ver builds, planes de prueba y publicaciones en tiendas"),
@@ -51,7 +52,7 @@ ALL_PERMISSIONS = [p[0] for p in CATALOG]
 _READ = ["incidencias.ver", "tareas.ver", "planificacion.ver", "calidad.ver", "conocimiento.ver",
          "actividad.ver_propia", "chat.usar"]
 # Permisos añadidos en versiones posteriores: se conceden una sola vez a estos roles en las bases de datos existentes.
-ADDED_PERMISSIONS = {"llamadas.usar": ["cto", "dev", "qa"]}
+ADDED_PERMISSIONS = {"llamadas.usar": ["cto", "dev", "qa"], "tareas.eliminar": ["cto"]}
 
 DEFAULT_ROLES = [
     {
@@ -66,7 +67,7 @@ DEFAULT_ROLES = [
             "incidencias.trabajar", "incidencias.resolver", "incidencias.verificar_todas", "incidencias.reabrir",
             "incidencias.comentar", "incidencias.adjuntar", "incidencias.asignar",
             "tareas.crear", "tareas.editar", "tareas.trabajar", "tareas.verificar_todas", "tareas.asignar",
-            "planificacion.editar", "calidad.editar", "chat.canales", "actividad.ver_todos",
+            "tareas.eliminar", "planificacion.editar", "calidad.editar", "chat.canales", "actividad.ver_todos",
             "conocimiento.editar", "boveda.ver", "informes.ver", "exportar", "equipo.ver", "proyectos.ver_todos",
             "llamadas.usar",
         ],
