@@ -195,14 +195,25 @@ class TurnServer:
 
     # -- arranque y parada ----------------------------------------------------------
     def start(self) -> None:
-        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.bind(("0.0.0.0", self.port))
+        # Con puerto 0 (pruebas) se elige uno libre: tiene que estarlo a la vez en UDP y en TCP, así que se reintenta.
+        attempts = 20 if self.port == 0 else 1
+        for attempt in range(attempts):
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp.bind(("0.0.0.0", self.port))
+            port = self.udp.getsockname()[1]
+            self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if os.name != "nt":
+                self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                self.tcp.bind(("0.0.0.0", port))
+                break
+            except OSError:
+                self.udp.close()
+                self.tcp.close()
+                if attempt == attempts - 1:
+                    raise
+        self.port = port
         self.udp.setblocking(False)
-        self.port = self.udp.getsockname()[1]
-        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if os.name != "nt":
-            self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp.bind(("0.0.0.0", self.port))
         self.tcp.listen(32)
         self.tcp.setblocking(False)
         self.sel.register(self.udp, selectors.EVENT_READ, ("udp", None))
