@@ -32,6 +32,7 @@ from . import (
     exports,
     incidents,
     integrations,
+    internet,
     knowledge,
     notifications,
     planning,
@@ -52,7 +53,7 @@ from .web import BaseHandler, HttpError, QuietServer, Response, Router, bad_requ
 LONG_POLL_MAX = 30
 DB_NAME = "devcontrol.db"
 MODULES = (relations, incidents, attachments, chat, calls, planning, quality, knowledge, team, reports, integrations,
-           watch, notifications, backups, exports)
+           watch, notifications, backups, exports, internet)
 FEATURES = ["calls", "follows"]
 # Rutas permitidas mientras el usuario debe cambiar la contraseña o activar la verificación en dos pasos.
 GATE_ALLOWED = {"/api/me", "/api/me/password", "/api/logout", "/api/me/2fa/start", "/api/me/2fa/confirm",
@@ -208,7 +209,13 @@ class ServerApp:
     # -- despacho de peticiones -----------------------------------------------------------
     def dispatch(self, handler: BaseHandler, req) -> Response:
         started = time.monotonic()
-        if not self.cfg.is_allowed_client(req.client_ip):
+        if req.via_internet:
+            # Por el túnel de Cloudflare solo se entra si el anfitrión lo ha activado (Ajustes → Acceso por Internet).
+            if self.db is None or not self.settings_cache("internet_access"):
+                raise HttpError(403, "internet_desactivado",
+                                "El anfitrión no permite entrar por Internet. Pídele que lo active en Ajustes → "
+                                "Acceso por Internet.")
+        elif not self.cfg.is_allowed_client(req.client_ip):
             self.log.warning("Conexión rechazada desde %s (fuera de las redes permitidas)", req.client_ip)
             raise HttpError(403, "red_no_autorizada", "Este equipo no está autorizado para conectarse a este servidor.")
         client_version = req.headers.get("x-devcontrol-version")
@@ -300,7 +307,7 @@ class ServerApp:
 
         @r.route("GET", "/api/health", auth=False)
         def health(req):
-            return self._health_payload()
+            return self._health_payload(req)
 
         @r.route("GET", "/api/recovery", auth=False)
         def recovery_info(req):
@@ -384,17 +391,23 @@ class ServerApp:
             shutil.rmtree(tmp, ignore_errors=True)
 
     # -- rutas básicas ------------------------------------------------------------------------
-    def _health_payload(self) -> dict:
+    def _health_payload(self, req=None) -> dict:
+        via_internet = bool(req and req.via_internet)
         out = {"ok": True, "app": APP_NAME, "version": APP_VERSION, "protocol_version": PROTOCOL_VERSION,
-               "min_client_version": MIN_CLIENT_VERSION, "server_time": now_iso(), "server_name": socket.gethostname(),
-               "listening": self.listening, "listen_errors": self.listen_errors}
+               "min_client_version": MIN_CLIENT_VERSION, "server_time": now_iso(), "via_internet": via_internet}
+        if not via_internet:   # el nombre del equipo y sus IP internas no se enseñan en Internet
+            out.update(server_name=socket.gethostname(), listening=self.listening, listen_errors=self.listen_errors)
         if self.db is None:
             out.update(recovery=True, recovery_reason=self.recovery["reason"], setup_required=False, epoch=None)
         else:
-            out.update(recovery=False, epoch=self.db.epoch, features=FEATURES, call_port=self.turn_port,
-                       call_error=self.turn_error,
+            # Por el túnel solo pasa la web (HTTP): las llamadas (UDP) no funcionan y no se ofrecen.
+            features = [f for f in FEATURES if not (via_internet and f == "calls")]
+            out.update(recovery=False, epoch=self.db.epoch, features=features,
                        setup_required=not self.db.scalar("SELECT COUNT(*) FROM users"),
-                       imported=self.import_summary)
+                       imported=self.import_summary,
+                       max_upload_mb=min(self.cfg.max_upload_mb, 95) if via_internet else self.cfg.max_upload_mb)
+            if not via_internet:
+                out.update(call_port=self.turn_port, call_error=self.turn_error)
         return out
 
     def _internal_shutdown(self, req):
@@ -409,7 +422,7 @@ class ServerApp:
 
         @r.route("GET", "/api/health", auth=False)
         def health(req):
-            return self._health_payload()
+            return self._health_payload(req)
 
         @r.route("POST", "/internal/shutdown", auth=False)
         def shutdown(req):

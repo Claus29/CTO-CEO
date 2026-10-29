@@ -2,6 +2,23 @@
 
 Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
 
+## [2.5.0] - 2026-10-29
+
+- **Acceso por Internet sin VPN** (Ajustes → Acceso por Internet): con un túnel gratuito de Cloudflare y un dominio
+  propio, los demás usan DEV CONTROL desde cualquier sitio escribiendo `https://devcontrol.tudominio.com` como
+  servidor. El anfitrión sigue siendo tu PC y los datos no salen de él. Interruptor para activarlo o cortarlo al
+  momento, botón «Comprobar» que dice exactamente qué falta, e instrucciones paso a paso ([docs/INTERNET.md](docs/INTERNET.md)).
+- Seguridad por Internet: quien entra por el túnel nunca tiene los privilegios del equipo anfitrión, los intentos
+  fallidos se bloquean por su IP real (sin bloquear al resto) y no se enseñan el nombre ni las IP internas del equipo.
+- Los miembros aceptan direcciones `https://` y explican con claridad si el anfitrión o el túnel están apagados (sus
+  cambios quedan en cola hasta que vuelva). Por Internet las llamadas no están disponibles y los adjuntos admiten
+  hasta 95 MB (límite de Cloudflare).
+- **Copia en la nube** (Copias de seguridad → Copia en la nube): cada copia se duplica en la carpeta que elijas
+  (OneDrive, Google Drive, Dropbox o un disco externo), con botón «Copiar ahora». Si falla, la copia normal se hace
+  igualmente y los administradores reciben un aviso.
+- El equipo anfitrión ya no se suspende mientras DEV CONTROL está abierto (la pantalla sí se apaga), para que esté
+  siempre disponible. Se puede desactivar con `mantener_despierto = no` en `config.ini`.
+
 ## [2.4.0] - 2026-10-24
 
 - **Eliminar tareas por completo**: en la tarea, «Más» → «Eliminar la tarea…». Se borra con sus comentarios, adjuntos,

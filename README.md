@@ -2,7 +2,8 @@
 
 **Coordinación privada para equipos de desarrollo pequeños** (2–15 personas): incidencias con verificación,
 tareas y tablero, planificación, calidad, chat, wiki y mucho más, en un programa de Windows que funciona
-**dentro de tu red** (red local, VPN o Tailscale). Sin nube, sin cuotas y con tus datos siempre en tu equipo.
+**dentro de tu red** (red local, VPN o Tailscale) o desde cualquier sitio con un túnel gratuito de Cloudflare.
+Sin cuotas y con tus datos siempre en tu equipo.
 
 > *English:* DEV CONTROL is a private, self-hosted coordination app for small software teams (bug tracking with
 > creator verification, tasks, planning, QA, chat and wiki). It runs as a native Windows program; one computer
@@ -39,6 +40,9 @@ tareas y tablero, planificación, calidad, chat, wiki y mucho más, en un progra
   ([docs/AVISOS.md](docs/AVISOS.md)).
 - **Llamadas de voz y vídeo** entre cuentas, de 2 o de grupo, con compartir pantalla: directas entre equipos o a
   través del anfitrión si no pueden verse ([docs/LLAMADAS.md](docs/LLAMADAS.md)).
+- **Acceso por Internet** sin VPN: con un túnel gratuito de Cloudflare y tu dominio, los demás escriben
+  `https://devcontrol.tudominio.com` como servidor; el anfitrión sigue en tu PC ([docs/INTERNET.md](docs/INTERNET.md)).
+- **Copia en la nube**: cada copia de seguridad se duplica en una carpeta de OneDrive, Google Drive o Dropbox.
 - **Conocimiento**: wiki con historial y **registro de decisiones** (`DEC-001`).
 - **Bóveda** cifrada para secretos del equipo (AES-GCM + scrypt), con registro de accesos.
 - **Integración con GitHub**: los commits y PR que citan `APP-012` se enlazan; una PR fusionada deja la incidencia

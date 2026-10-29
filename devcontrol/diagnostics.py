@@ -4,8 +4,10 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import ssl
 
 from . import APP_NAME, APP_VERSION
+from .config import format_server_address
 from .paths import is_synced_folder
 
 
@@ -27,11 +29,12 @@ def run_diagnostics(layout, cfg) -> int:
         if is_synced_folder(data):
             _line(False, "La carpeta de datos está dentro de OneDrive u otra carpeta sincronizada.",
                   "Deja vacío «carpeta_datos» en la configuración para usar la ubicación por defecto.")
-    host, port = cfg.default_server_address()
-    print(f"\nServidor por defecto: {host}:{port}")
+    scheme, host, port = cfg.default_server_url()
+    print(f"\nServidor por defecto: {format_server_address(host, port, scheme)}")
     failures = 0
     try:
-        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn = (http.client.HTTPSConnection(host, port, timeout=8, context=ssl.create_default_context())
+                if scheme == "https" else http.client.HTTPConnection(host, port, timeout=5))
         conn.request("GET", "/api/health")
         resp = conn.getresponse()
         info = json.loads(resp.read() or b"{}")
@@ -41,6 +44,9 @@ def run_diagnostics(layout, cfg) -> int:
             if info.get("recovery"):
                 _line(False, "El servidor está en modo recuperación.", "Abre DEV CONTROL en el anfitrión y restaura una copia.")
                 failures += 1
+        elif info.get("message"):
+            _line(False, f"El servidor respondió {resp.status}: {info['message']}")
+            failures += 1
         else:
             _line(False, f"En {host}:{port} responde otro programa.", "Revisa la dirección y el puerto del servidor.")
             failures += 1

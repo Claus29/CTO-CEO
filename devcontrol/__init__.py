@@ -2,7 +2,7 @@
 
 APP_NAME = "DEV CONTROL"
 APP_ID = "DevControl"
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 # Versión del protocolo entre clientes y servidor. Se incrementa cuando un
 # cambio de la API deja de ser compatible con versiones anteriores.
 PROTOCOL_VERSION = 3

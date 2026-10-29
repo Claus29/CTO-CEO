@@ -71,6 +71,23 @@ class Response:
         return r
 
 
+def tunnel_origin(peer: str, headers: dict) -> tuple[str, bool]:
+    """El túnel de Cloudflare (cloudflared) se conecta al servidor desde este mismo equipo y añade la IP real en
+    «CF-Connecting-IP». Solo se cree esa cabecera si la conexión viene de este equipo: desde la red no se puede
+    falsificar, y por el túnel la pone Cloudflare (sustituye cualquier valor que mande el visitante).
+    Devuelve (IP real, llegó por Internet)."""
+    loopback = peer in ("127.0.0.1", "::1") or peer.startswith("::ffff:127.")
+    real = (headers.get("cf-connecting-ip") or "").strip()
+    if not loopback or not real:
+        return peer, False
+    try:
+        import ipaddress
+        ipaddress.ip_address(real)
+    except ValueError:
+        return "0.0.0.0", True        # cabecera rara: se trata como alguien de fuera, nunca como este equipo
+    return real, True
+
+
 @dataclass
 class Request:
     method: str
@@ -83,6 +100,7 @@ class Request:
     user: dict | None = None
     session_hash: str | None = None
     params: dict = field(default_factory=dict)
+    via_internet: bool = False      # llegó por el túnel de Cloudflare (client_ip es entonces la IP real)
 
     @property
     def json(self) -> dict:
@@ -179,12 +197,15 @@ class BaseHandler(BaseHTTPRequestHandler):
 
     def _handle(self):
         split = urlsplit(self.path)
+        headers = {k.lower(): v for k, v in self.headers.items()}
+        client_ip, via_internet = tunnel_origin(self.client_address[0], headers)
         req = Request(
             method=self.command,
             path=split.path,
             query=parse_query(split.query),
-            headers={k.lower(): v for k, v in self.headers.items()},
-            client_ip=self.client_address[0],
+            headers=headers,
+            client_ip=client_ip,
+            via_internet=via_internet,
         )
         try:
             resp = self.app.dispatch(self, req)

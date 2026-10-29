@@ -11,12 +11,13 @@ import configparser
 import http.client
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
 
 from . import APP_NAME, APP_VERSION
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, server_base_url
 from .logs import setup_logging
 from .paths import Layout, default_layout, is_synced_folder
 from .winutil import message_box, open_path, set_autostart
@@ -54,8 +55,7 @@ class App:
         """Servidor del que los miembros reciben las actualizaciones (el anfitrión)."""
         if self.cfg.is_host:
             return None
-        host, port = self.agent.server_host, self.agent.server_port
-        return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+        return server_base_url(self.agent.server_scheme, self.agent.server_host, self.agent.server_port)
 
     # -- actualización automática -----------------------------------------------------------
     def _auto_scheduled(self, version: str, seconds: int) -> None:
@@ -211,6 +211,8 @@ class App:
             self.stop_server()
             return 1
         threading.Thread(target=self.updater.loop, name="actualizaciones", daemon=True).start()
+        if self.cfg.is_host and self.cfg.keep_awake and sys.platform == "win32":
+            threading.Thread(target=self._keep_awake, name="mantener-despierto", daemon=True).start()
         if open_target:   # arrancado al pulsar un aviso: la interfaz lo abrirá al cargar
             self.agent.request_open(open_target, show=False)
         try:
@@ -239,6 +241,24 @@ class App:
             return 0
         self.start_tray()
         return self.run_window(start_hidden)
+
+    def _keep_awake(self) -> None:
+        """El anfitrión no entra en suspensión mientras DEV CONTROL esté abierto (la pantalla sí puede apagarse).
+
+        Así los demás equipos, también los que entran por Internet, lo encuentran siempre disponible."""
+        import ctypes
+        es_continuous, es_system_required = 0x80000000, 0x00000001
+        try:
+            ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
+            self.log.info("El equipo no se suspenderá mientras DEV CONTROL esté abierto ([escritorio] mantener_despierto)")
+            self.stop_event.wait()
+        except Exception as exc:
+            self.log.warning("No se pudo evitar la suspensión del equipo: %s", exc)
+        finally:
+            try:
+                ctypes.windll.kernel32.SetThreadExecutionState(es_continuous)
+            except Exception:
+                pass
 
     def run_window(self, start_hidden: bool) -> int:
         try:

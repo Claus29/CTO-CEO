@@ -734,6 +734,10 @@ DEFAULT_SETTINGS = {
     "github": {"repo": "", "poll_minutes": 10, "enabled": False, "last_poll": None},
     "password_min_length": 10,
     "require_2fa_roles": [],
+    # 2.5: acceso por Internet (túnel de Cloudflare) y copia extra de las copias de seguridad
+    "internet_access": False,
+    "internet_address": "",
+    "backup_mirror_dir": "",
 }
 
 

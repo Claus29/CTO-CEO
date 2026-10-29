@@ -473,7 +473,7 @@ function authScreen(...children) {
 }
 
 function serverField(local, value) {
-  const input = h('input', { value: value ?? '', placeholder: local?.default_server_label ? `Por defecto: ${local.default_server_label}` : 'IP o nombre del servidor (vacío = por defecto)', list: 'dc-servers', autocomplete: 'off' });
+  const input = h('input', { value: value ?? '', placeholder: local?.default_server_label ? `Por defecto: ${local.default_server_label}` : 'IP, nombre o https://… (vacío = por defecto)', list: 'dc-servers', autocomplete: 'off' });
   const dl = h('datalist', { id: 'dc-servers' }, (local?.profiles || []).map(p => h('option', { value: p.server }, p.label || '')));
   const status = h('div', { class: 'tiny muted server-test' });
   const test = h('button', { class: 'btn sm', type: 'button', onclick: async () => {
@@ -484,7 +484,7 @@ function serverField(local, value) {
       status.textContent = r.ok ? `Conectado con ${r.server_label} (DEV CONTROL ${r.version})` : r.message;
     } catch (err) { status.className = 'tiny server-test danger-text'; status.textContent = err.message; }
   } }, 'Probar conexión');
-  return { input, el: h('div', { class: 'col' }, field('Servidor', h('div', { class: 'row' }, input, test), { hint: 'Déjalo vacío para usar el servidor por defecto de este equipo.' }), dl, status) };
+  return { input, el: h('div', { class: 'col' }, field('Servidor', h('div', { class: 'row' }, input, test), { hint: 'Déjalo vacío para usar el servidor por defecto de este equipo. Desde fuera de la oficina, escribe la dirección https:// que te haya dado el anfitrión.' }), dl, status) };
 }
 
 async function connectTo(server) {

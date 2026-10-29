@@ -13,6 +13,7 @@ const TABS = [
   { key: 'plantillas', label: 'Plantillas de reporte', icon: 'file', perm: 'sistema.ajustes' },
   { key: 'copias', label: 'Copias de seguridad', icon: 'backup', perm: 'sistema.copias' },
   { key: 'integraciones', label: 'Integraciones', icon: 'git', perm: 'sistema.integraciones' },
+  { key: 'internet', label: 'Acceso por Internet', icon: 'wifi', perm: 'sistema.ajustes' },
   { key: 'servidor', label: 'Servidor y actualizaciones', icon: 'server' },
 ];
 const WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
@@ -25,7 +26,7 @@ export default async function render(ctx) {
   const body = h('div');
   mount(root, pageHead('Ajustes'), tabs(allowed, active, (k) => { location.hash = `#/ajustes/${k}`; }), body);
   ctx.setTitle(`Ajustes · ${allowed.find(t => t.key === active).label}`);
-  const views = { general: generalTab, sla: slaTab, plantillas: templatesTab, copias: backupsTab, integraciones: githubTab, servidor: renderServerPanel };
+  const views = { general: generalTab, sla: slaTab, plantillas: templatesTab, copias: backupsTab, integraciones: githubTab, internet: internetTab, servidor: renderServerPanel };
   return views[active](body, ctx);
 }
 
@@ -200,9 +201,12 @@ async function templatesTab(root, ctx) {
 
 // ---------- Copias de seguridad ----------
 async function backupsTab(root, ctx) {
-  let data = null;
+  let data = null, mirror = null;
   const run = async () => {
-    try { data = await api.get('/api/backups'); draw(); } catch (err) { mount(root, errorBox(err, run)); }
+    try {
+      [data, mirror] = await Promise.all([api.get('/api/backups'), api.get('/api/backups/mirror').catch(() => null)]);
+      draw();
+    } catch (err) { mount(root, errorBox(err, run)); }
   };
   const countsText = (c) => {
     if (!c) return '—';
@@ -233,6 +237,7 @@ async function backupsTab(root, ctx) {
             field('Copias automáticas a conservar', keep, { hint: 'Las más antiguas se borran solas. Las manuales nunca.' })),
           h('div', { class: 'row end mt' }, saveAuto),
           h('p', { class: 'tiny muted' }, 'También se hace una copia al detener el servidor y antes de cada actualización o restauración.'))),
+      mirror ? mirrorCard() : null,
       h('div', null,
         h('div', { class: 'row between mb' }, h('h3', null, `Copias disponibles (${data.items.length})`), h('span', { class: 'small muted' }, `Ocupan ${fmtSize(total)}`)),
         table([
@@ -249,6 +254,27 @@ async function backupsTab(root, ctx) {
             h('button', { class: 'btn sm', disabled: b.damaged, onclick: () => restore(b) }, icon('undo', 14), 'Restaurar'),
             h('button', { class: 'btn sm ghost icon', title: 'Borrar', onclick: (e) => remove(b, e.currentTarget) }, icon('trash', 14))) },
         ], data.items, { empty: 'Aún no hay copias. Crea una con «Crear copia ahora».' }))));
+  }
+  function mirrorCard() {
+    const folder = h('input', { class: 'mono', value: mirror.folder || '', placeholder: 'C:\\Users\\tu\\OneDrive\\Copias DEV CONTROL', spellcheck: 'false' });
+    const st = mirror.status || {};
+    const save = h('button', { class: 'btn primary', onclick: () => busy(save, () => api.put('/api/backups/mirror', { folder: folder.value.trim(), copy_now: true }),
+      folder.value.trim() ? 'Carpeta espejo guardada.' : 'Copia espejo desactivada.').then((m) => { mirror = m; draw(); }).catch(() => {}) }, 'Guardar');
+    const now = h('button', { class: 'btn', disabled: !mirror.folder, onclick: () => busy(now, () => api.post('/api/backups/mirror/now'))
+      .then((r) => { toast(r.item?.mirror?.ok ? 'Copia creada y guardada en la carpeta espejo.' : (r.item?.mirror?.error || 'Copia creada.'), r.item?.mirror?.ok ? 'ok' : 'error'); run(); }).catch(() => {}) },
+    icon('backup', 14), 'Copiar ahora');
+    const off = mirror.folder ? h('button', { class: 'btn ghost', onclick: () => busy(off, () => api.put('/api/backups/mirror', { folder: '' }), 'Copia espejo desactivada.')
+      .then((m) => { mirror = m; draw(); }).catch(() => {}) }, 'Quitar') : null;
+    return h('div', { class: 'card' },
+      h('div', { class: 'card-head' }, h('h3', null, 'Copia en la nube (carpeta espejo)'),
+        mirror.folder ? h('span', { class: `badge ${st.ok === false ? 'danger' : 'ok'}` }, st.ok === false ? 'Con errores' : 'Activada') : h('span', { class: 'badge neutral' }, 'Desactivada')),
+      h('p', { class: 'small muted' }, 'Cada copia de seguridad se copia además a esta carpeta del equipo anfitrión. Si eliges una carpeta de OneDrive, Google Drive o Dropbox, las copias se suben solas a la nube y no se pierden aunque se estropee el PC. En la carpeta espejo se conservan las mismas copias automáticas que aquí y las 10 últimas de los demás tipos.'),
+      field('Carpeta (en el equipo anfitrión)', folder, { hint: 'Ruta completa. Si no existe, se crea.' }),
+      mirror.suggestions?.length ? h('div', { class: 'row wrap adm-gap-sm mt' }, h('span', { class: 'small muted' }, 'Sugerencias:'),
+        ...mirror.suggestions.map(sg => h('button', { class: 'btn sm', title: sg.path, onclick: () => { folder.value = sg.path; folder.focus(); } }, icon('folder', 12), sg.label))) : null,
+      mirror.folder && st.at ? h('div', { class: `callout ${st.ok ? 'ok' : 'danger'} small mt` },
+        st.ok ? `Última copia guardada en la nube: ${st.name} (${fmtRelative(st.at)}).` : `Último intento (${fmtRelative(st.at)}): ${st.error}`) : null,
+      h('div', { class: 'row end mt' }, off, now, save));
   }
   function restore(b) {
     const input = h('input', { class: 'mono', placeholder: b.name, autocomplete: 'off', spellcheck: 'false' });
@@ -335,6 +361,61 @@ async function githubTab(root, ctx) {
         h('div', { class: 'kv' }, h('span', null, 'Fecha'), h('span', null, cfg.last_poll ? `${fmtDateTime(cfg.last_poll)} (${fmtRelative(cfg.last_poll)})` : 'Nunca')),
         h('div', { class: 'mt' }, result))));
     repo.focus();
+  }
+  mount(root, loading());
+  await run();
+}
+
+// ---------- Acceso por Internet (túnel de Cloudflare) ----------
+async function internetTab(root, ctx) {
+  let cfg = null;
+  const run = async () => {
+    try { cfg = await api.get('/api/internet'); draw(); } catch (err) { mount(root, errorBox(err, run)); }
+  };
+  function draw() {
+    const address = h('input', { class: 'mono', value: cfg.address || '', placeholder: 'https://devcontrol.tudominio.com', spellcheck: 'false', autocomplete: 'off' });
+    const enabled = h('input', { type: 'checkbox', checked: cfg.enabled });
+    const result = h('div');
+    const save = h('button', { class: 'btn primary', onclick: () => busy(save, () => api.put('/api/internet', { address: address.value.trim(), enabled: enabled.checked }),
+      'Acceso por Internet guardado.').then((c) => { cfg = c; draw(); }).catch(() => {}) }, 'Guardar');
+    const test = h('button', { class: 'btn', onclick: () => {
+      if (!address.value.trim()) { toast('Escribe primero la dirección.', 'error'); address.focus(); return; }
+      busy(test, () => api.post('/api/internet/test', { address: address.value.trim() })).then((r) => {
+        mount(result, h('div', { class: `callout ${r.ok ? 'ok' : r.tunnel_ok ? 'warn' : 'danger'} small` }, r.message));
+      }).catch(() => {});
+    } }, icon('refresh', 14), 'Comprobar');
+    const viaInternet = store.local?.server_info?.via_internet;
+    const step = (...content) => h('li', null, ...content);
+    mount(root, h('div', { class: 'col gap-lg adm-narrow' },
+      h('div', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', null, 'Entrar desde fuera de la oficina'),
+          cfg.enabled ? h('span', { class: 'badge ok' }, 'Activado') : h('span', { class: 'badge neutral' }, 'Desactivado')),
+        h('p', { class: 'small muted' }, 'Con un túnel gratuito de Cloudflare los demás pueden usar DEV CONTROL desde cualquier sitio, sin VPN ni Tailscale: '
+          + 'escriben una dirección https:// como servidor. Los datos y las copias siguen en este equipo anfitrión, que debe estar encendido.'),
+        h('div', { class: 'form-grid mt' },
+          field('Dirección pública', address, { cls: 'span2', hint: 'La que creaste en Cloudflare, por ejemplo https://devcontrol.tudominio.com' }),
+          h('label', { class: 'check span2' }, enabled, 'Permitir entrar por Internet')),
+        viaInternet ? h('div', { class: 'callout warn small mt' }, 'Estás conectado por Internet: si desactivas el acceso, perderás la conexión desde este equipo.') : null,
+        h('div', { class: 'row end mt' }, test, save),
+        h('div', { class: 'mt' }, result)),
+      h('div', { class: 'card' },
+        h('h3', null, 'Cómo se prepara (una sola vez, en el equipo anfitrión)'),
+        h('ol', { class: 'small adm-steps' },
+          step('En ', h('b', null, 'dash.cloudflare.com'), ' → ', h('b', null, 'Zero Trust'), ' → ', h('b', null, 'Networks → Tunnels'), ' → ', h('b', null, 'Create a tunnel'), ' (tipo «Cloudflared»). Ponle un nombre, por ejemplo «devcontrol».'),
+          step('Elige ', h('b', null, 'Windows'), ', descarga el instalador de cloudflared y ejecuta en este equipo, como administrador, el comando que te muestra («cloudflared.exe service install …»). Queda como servicio de Windows y arranca solo.'),
+          step('En ', h('b', null, 'Public hostname'), ': subdominio ', h('b', { class: 'mono' }, 'devcontrol'), ', tu dominio, y en Service: tipo ', h('b', { class: 'mono' }, 'HTTP'), ' y URL ', h('b', { class: 'mono' }, `127.0.0.1:${cfg.port}`), '. Guarda.'),
+          step('Aquí arriba escribe la dirección (https://devcontrol.tudominio.com), marca «Permitir entrar por Internet», pulsa ', h('b', null, 'Guardar'), ' y luego ', h('b', null, 'Comprobar'), '.'),
+          step('Los demás, en la pantalla de inicio de sesión, escriben esa dirección en «Servidor». No tienen que instalar nada más.'))),
+      h('div', { class: 'card' },
+        h('h3', null, 'Bueno saberlo'),
+        h('ul', { class: 'small adm-steps' },
+          h('li', null, h('b', null, 'Seguridad: '), 'la dirección es pública, así que cualquiera puede ver la pantalla de inicio de sesión. Usa contraseñas largas y activa la verificación en dos pasos para todos en «General y avisos → Roles que deben usar la verificación en dos pasos». Los intentos fallidos se bloquean por IP.'),
+          h('li', null, h('b', null, 'Funciones del anfitrión: '), 'quien entra por Internet nunca tiene los privilegios de este equipo (crear la primera cuenta, recuperación, detener el servidor).'),
+          h('li', null, h('b', null, 'Llamadas: '), 'las llamadas de voz y vídeo no pasan por el túnel; desde Internet no aparecen. Siguen funcionando en la red local o con Tailscale.'),
+          h('li', null, h('b', null, 'Adjuntos: '), 'por Internet el máximo es de 95 MB por archivo (límite del plan gratuito de Cloudflare).'),
+          h('li', null, h('b', null, 'Siempre disponible: '), 'mientras DEV CONTROL está abierto, este equipo no se suspende (la pantalla sí se apaga). Si el PC se apaga, los demás verán «el anfitrión no responde» y sus cambios quedarán en cola hasta que vuelva.'),
+          h('li', null, h('b', null, 'Copias: '), 'para tener las copias también en la nube, elige una carpeta de OneDrive o Google Drive en «Copias de seguridad → Copia en la nube».')))));
+    address.focus();
   }
   mount(root, loading());
   await run();

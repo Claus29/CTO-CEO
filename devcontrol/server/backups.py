@@ -21,6 +21,8 @@ KIND_LABELS = {"auto": "Automática", "manual": "Manual", "previa-restauracion":
                "cierre": "Al detener el servidor", "previa-actualizacion": "Previa a una actualización",
                "previa-migracion": "Previa a una migración de datos"}
 PREFIX = "devcontrol"
+MIRROR_STATUS = "espejo.json"
+MIRROR_KEEP_OTHERS = 10   # copias no automáticas que se conservan en la carpeta espejo
 
 
 class BackupError(Exception):
@@ -122,7 +124,71 @@ class BackupManager:
             os.replace(partial, self.dir / name)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        return self.describe(self.dir / name)
+        info = self.describe(self.dir / name)
+        mirror = self.mirror(self.dir / name)
+        if mirror:
+            info["mirror"] = mirror
+        return info
+
+    # -- carpeta espejo (OneDrive, Google Drive, un disco externo...) ----------------------------
+    def mirror_dir(self) -> Path | None:
+        try:
+            value = (self.db.get_setting("backup_mirror_dir") or "").strip() if self.db else ""
+        except Exception:
+            return None
+        return Path(value) if value else None
+
+    def mirror_status(self) -> dict:
+        try:
+            return json.loads((self.dir / MIRROR_STATUS).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _save_mirror_status(self, status: dict) -> None:
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            (self.dir / MIRROR_STATUS).write_text(json.dumps(status, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+    def mirror(self, path: Path, folder: Path | None = None) -> dict | None:
+        """Copia la copia recién creada a la carpeta espejo. Nunca hace fallar la copia de seguridad."""
+        folder = folder or self.mirror_dir()
+        if not folder:
+            return None
+        status = {"at": now_iso(), "name": path.name, "folder": str(folder)}
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            partial = folder / (path.name + ".parcial")
+            shutil.copyfile(path, partial)
+            os.replace(partial, folder / path.name)
+            self._mirror_retention(folder)
+            status["ok"] = True
+        except OSError as exc:
+            status.update(ok=False, error=f"No se pudo copiar a {folder}: {exc.strerror or exc}")
+        self._save_mirror_status(status)
+        return status
+
+    def _mirror_retention(self, folder: Path) -> None:
+        try:
+            keep = int(self.db.get_setting("backup_keep")) if self.db else 30
+        except Exception:
+            keep = 30
+        stamp = lambda p: re.search(r"\d{8}-\d{6}", p.name).group(0)  # noqa: E731
+        copies = [p for p in folder.glob(f"{PREFIX}-copia-*.zip") if NAME_RE.match(p.name)]
+        autos = sorted((p for p in copies if p.name.endswith("-auto.zip")), key=stamp)
+        others = sorted((p for p in copies if not p.name.endswith("-auto.zip")), key=stamp)
+        for p in autos[: max(0, len(autos) - max(1, keep))] + others[: max(0, len(others) - MIRROR_KEEP_OTHERS)]:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        for p in folder.glob("*.zip.parcial"):   # restos de una copia interrumpida
+            try:
+                if (datetime.now() - datetime.fromtimestamp(p.stat().st_mtime)) > timedelta(hours=6):
+                    p.unlink()
+            except OSError:
+                pass
 
     def describe(self, path: Path) -> dict:
         info = {"name": path.name, "size": path.stat().st_size, "created_at": None, "kind": None, "counts": {}}
@@ -273,6 +339,44 @@ def register(router, app):
                          f"Creó una copia de seguridad manual ({info['name']})")
         return Response.json({"item": info}, 201)
 
+    def mirror_state() -> dict:
+        folder = mgr.mirror_dir()
+        return {"folder": str(folder) if folder else "", "status": mgr.mirror_status() if folder else {},
+                "suggestions": mirror_suggestions()}
+
+    @router.route("GET", "/api/backups/mirror", perm="sistema.copias")
+    def get_mirror(req):
+        return mirror_state()
+
+    @router.route("PUT", "/api/backups/mirror", perm="sistema.copias")
+    def put_mirror(req):
+        raw = str(req.json.get("folder") or "").strip().strip('"')
+        folder = check_mirror_folder(raw, mgr.dir) if raw else None
+        old = db.get_setting("backup_mirror_dir") or ""
+        new = str(folder) if folder else ""
+        if new != old:
+            with db.tx() as c:
+                db.put_setting(c, "backup_mirror_dir", new)
+                log_activity(db, c, req.user, "settings", None, "backup_mirror_dir", "changed",
+                             f"Copia espejo de las copias de seguridad: {new}" if new
+                             else "Desactivó la copia espejo de las copias de seguridad")
+            app.settings_invalidate()
+        if folder and req.json.get("copy_now"):
+            items = mgr.list()
+            if items:
+                mgr.mirror(mgr.dir / items[0]["name"], folder)
+        return mirror_state()
+
+    @router.route("POST", "/api/backups/mirror/now", perm="sistema.copias")
+    def mirror_now(req):
+        if not mgr.mirror_dir():
+            raise bad_request("Primero elige la carpeta espejo.", "sin_carpeta")
+        info = mgr.create("manual", req.user)
+        with db.tx() as c:
+            log_activity(db, c, req.user, "backup", None, info["name"], "created",
+                         f"Creó una copia de seguridad manual ({info['name']}) y la copió a la carpeta espejo")
+        return {"item": info, **mirror_state()}
+
     @router.route("POST", "/api/backups/{name}/restore", perm="sistema.copias")
     def restore(req, name):
         if req.json.get("confirm") != name:
@@ -306,6 +410,7 @@ def register(router, app):
         settings = db.all_settings()
         settings.pop("vault", None)
         settings.pop("github", None)
+        settings.pop("backup_mirror_dir", None)   # ruta del equipo anfitrión: se consulta en /api/backups/mirror
         return {"settings": settings}
 
     INT_RULES = {"auto_backup_hours": (0, 24 * 30), "backup_keep": (1, 1000), "stale_days": (0, 365),
@@ -373,6 +478,46 @@ def register(router, app):
         return get_settings(req)
 
 
+def mirror_suggestions() -> list[dict]:
+    """Carpetas sincronizadas con la nube que existen en este equipo."""
+    out, seen = [], set()
+    home = Path.home()
+    candidates = [("OneDrive", os.environ.get("OneDriveConsumer")), ("OneDrive", os.environ.get("OneDrive")),
+                  ("OneDrive (empresa)", os.environ.get("OneDriveCommercial")),
+                  ("Google Drive", "G:\\Mi unidad"), ("Google Drive", "G:\\My Drive"),
+                  ("Google Drive", str(home / "Google Drive")), ("Dropbox", str(home / "Dropbox"))]
+    for label, base in candidates:
+        if not base:
+            continue
+        try:
+            if not Path(base).is_dir():
+                continue
+        except OSError:
+            continue
+        path = str(Path(base) / "Copias DEV CONTROL")
+        if path.lower() not in seen:
+            seen.add(path.lower())
+            out.append({"label": label, "path": path})
+    return out
+
+
+def check_mirror_folder(raw: str, backups_dir: Path) -> Path:
+    folder = Path(os.path.expandvars(raw)).expanduser()
+    if not folder.is_absolute():
+        raise bad_request("Escribe la ruta completa de la carpeta (por ejemplo C:\\Users\\tu\\OneDrive\\Copias DEV CONTROL).",
+                          "carpeta_no_valida")
+    try:
+        if folder.resolve() == Path(backups_dir).resolve():
+            raise bad_request("La carpeta espejo debe ser distinta de la carpeta de copias.", "carpeta_no_valida")
+        folder.mkdir(parents=True, exist_ok=True)
+        probe = folder / ".prueba-devcontrol"
+        probe.write_bytes(b"ok")
+        probe.unlink()
+    except OSError as exc:
+        raise bad_request(f"No se puede escribir en {folder}: {exc.strerror or exc}", "carpeta_no_valida")
+    return folder
+
+
 def run_auto_backup(app) -> None:
     hours = int(app.db.get_setting("auto_backup_hours"))
     if hours <= 0:
@@ -391,6 +536,14 @@ def run_auto_backup(app) -> None:
             raise
         app.backups.apply_retention(int(app.db.get_setting("backup_keep")))
         app.log.info("Copia automática creada: %s", info["name"])
+        mirror = info.get("mirror")
+        if mirror and not mirror.get("ok"):
+            app.log.warning("Copia espejo fallida: %s", mirror.get("error"))
+            from .common import notify, users_with_perm
+            with app.db.tx() as c:
+                notify(app.db, c, users_with_perm(c, "sistema.copias"), "server_health",
+                       "No se pudo guardar la copia en la carpeta espejo", str(mirror.get("error"))[:300],
+                       f"mirror-failed-{datetime.now().date().isoformat()}", urgent=False)
         with app.db.tx() as c:
             log_activity(app.db, c, None, "backup", None, info["name"], "created",
                          f"Copia de seguridad automática creada ({info['name']})")

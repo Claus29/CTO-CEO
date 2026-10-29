@@ -72,6 +72,8 @@ automaticas = si
 [escritorio]
 iniciar_con_windows = {autostart}
 minimizar_al_cerrar = si
+; Solo en el anfitrión: si = el equipo no se suspende mientras DEV CONTROL esté abierto (la pantalla sí se apaga).
+mantener_despierto = si
 """
 
 
@@ -105,9 +107,34 @@ def parse_server_address(value: str, default_port: int = DEFAULT_SERVER_PORT) ->
     return host, port_n
 
 
-def format_server_address(host: str, port: int) -> str:
+def parse_server_url(value: str, default_port: int = DEFAULT_SERVER_PORT) -> tuple[str, str, int]:
+    """Como parse_server_address, pero admite también 'https://devcontrol.midominio.com' (túnel por Internet).
+
+    Devuelve (esquema, host, puerto). Sin esquema se usa http y el puerto de DEV CONTROL; con https,
+    el 443 salvo que se indique otro."""
+    value = (value or "").strip()
+    m = re.match(r"^(https?)://", value, re.IGNORECASE)
+    if not m:
+        return ("http", *parse_server_address(value, default_port))
+    scheme = m.group(1).lower()
+    rest = value[m.end():].rstrip("/")
+    if "/" in rest or "?" in rest or "#" in rest:
+        raise ConfigError(f"La dirección «{value}» no debe llevar ruta: deja solo https://nombre.dominio")
+    host, port = parse_server_address(rest, 443 if scheme == "https" else 80)
+    return scheme, host, port
+
+
+def format_server_address(host: str, port: int, scheme: str = "http") -> str:
     h = f"[{host}]" if ":" in host else host
+    if scheme == "https":
+        return f"https://{h}" if port == 443 else f"https://{h}:{port}"
     return h if port == DEFAULT_SERVER_PORT else f"{h}:{port}"
+
+
+def server_base_url(scheme: str, host: str, port: int) -> str:
+    h = f"[{host}]" if ":" in host else host
+    default = 443 if scheme == "https" else 80
+    return f"{scheme}://{h}" if port == default else f"{scheme}://{h}:{port}"
 
 
 @dataclass
@@ -132,6 +159,7 @@ class Config:
     auto_update: bool = True
     autostart: bool = True
     minimize_on_close: bool = True
+    keep_awake: bool = True
     # IP propias del anfitrión (las que recibe el servidor de sí mismo)
     own_addresses: set = field(default_factory=set)
 
@@ -145,10 +173,14 @@ class Config:
             return self.data_dir
         return (self.layout or default_layout()).server_dir
 
-    def default_server_address(self) -> tuple[str, int]:
+    def default_server_url(self) -> tuple[str, str, int]:
+        """(esquema, host, puerto) del servidor por defecto de este equipo."""
         if self.is_host and not self.default_server:
-            return "127.0.0.1", self.server_port
-        return parse_server_address(self.default_server or "127.0.0.1", self.server_port)
+            return "http", "127.0.0.1", self.server_port
+        return parse_server_url(self.default_server or "127.0.0.1", self.server_port)
+
+    def default_server_address(self) -> tuple[str, int]:
+        return self.default_server_url()[1:]
 
     # -- red ----------------------------------------------------------------
     @staticmethod
@@ -283,13 +315,14 @@ def load_config(layout: Layout | None = None, path: Path | None = None) -> Confi
     cfg.blocked_extensions = {e.strip().lower().lstrip(".") for e in exts.split(",") if e.strip()}
     cfg.default_server = get("cliente", "servidor")
     if cfg.default_server:
-        parse_server_address(cfg.default_server, cfg.server_port)
+        parse_server_url(cfg.default_server, cfg.server_port)
     cfg.local_port = get_int("cliente", "puerto_local", DEFAULT_LOCAL_PORT)
     cfg.update_repo = get("actualizaciones", "repositorio", DEFAULT_REPOSITORY) or DEFAULT_REPOSITORY
     cfg.update_every_minutes = max(10, get_int("actualizaciones", "comprobar_cada_minutos", 30))
     cfg.auto_update = _yes(get("actualizaciones", "automaticas", "si"))
     cfg.autostart = _yes(get("escritorio", "iniciar_con_windows", "si"))
     cfg.minimize_on_close = _yes(get("escritorio", "minimizar_al_cerrar", "si"))
+    cfg.keep_awake = _yes(get("escritorio", "mantener_despierto", "si"))
     for port, label in ((cfg.server_port, "[servidor] puerto"), (cfg.local_port, "[cliente] puerto_local")):
         if not 1024 <= port <= 65535:
             raise ConfigError(f"{label} debe estar entre 1024 y 65535.")

@@ -283,6 +283,10 @@ export async function uploadFiles(files, target, listEl) {
       h('div', { class: 'progress' }, bar), st);
     listEl?.appendChild(row);
     try {
+      const info = store.local?.server_info || {};
+      if (info.max_upload_mb && file.size > info.max_upload_mb * 1024 * 1024) {
+        throw new Error(`supera el máximo de ${info.max_upload_mb} MB por archivo${info.via_internet ? ' cuando se entra por Internet' : ''}.`);
+      }
       const r = await api.upload(file, { ...target, uid: uid() }, (p) => { bar.style.width = `${Math.round(p * 100)}%`; });
       bar.style.width = '100%';
       row.classList.add('done');

@@ -19,6 +19,7 @@ import secrets
 import shutil
 import socket
 import sqlite3
+import ssl
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -27,7 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import APP_NAME, APP_VERSION
-from ..config import Config, ConfigError, format_server_address, parse_server_address
+from ..config import Config, ConfigError, format_server_address, parse_server_url
 from ..logs import setup_logging
 from ..paths import WEB_DIR, Layout
 from ..server.web import QuietServer
@@ -195,6 +196,7 @@ class Agent:
         self._conn_lock = threading.RLock()
         self.httpd: QuietServer | None = None
         self.outbox: Outbox | None = None
+        self.server_scheme = "http"
         secret_file = self.client_root / ".secreto_local"
         if not secret_file.exists():
             secret_file.write_text(secrets.token_urlsafe(24), encoding="utf-8")
@@ -220,19 +222,18 @@ class Agent:
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.client_root / name)
 
-    def resolve(self, server: str) -> tuple[str, int, bool]:
-        """'' = servidor por defecto de este equipo. Devuelve (host, puerto, es_por_defecto)."""
+    def resolve(self, server: str) -> tuple[str, str, int, bool]:
+        """'' = servidor por defecto de este equipo. Devuelve (esquema, host, puerto, es_por_defecto)."""
         server = (server or "").strip()
         if not server:
-            host, port = self.cfg.default_server_address()
-            return host, port, True
-        host, port = parse_server_address(server, self.cfg.server_port)
-        return host, port, False
+            return (*self.cfg.default_server_url(), True)
+        return (*parse_server_url(server, self.cfg.server_port), False)
 
     def connect(self, server: str) -> dict:
-        host, port, is_default = self.resolve(server)
+        scheme, host, port, is_default = self.resolve(server)
         with self._conn_lock:
-            key = f"{host}:{port}"
+            # las conexiones http conservan la clave de siempre (su bandeja de salida no cambia de carpeta)
+            key = f"{host}:{port}" if scheme == "http" else f"{scheme}://{host}:{port}"
             if self.outbox is None or key != getattr(self, "server_key", None):
                 old = self.outbox
                 folder = self.client_root / "servidores" / safe_dir_name(key)
@@ -240,7 +241,7 @@ class Agent:
                 self.outbox = Outbox(folder / "cliente.db")
                 if old is not None:
                     old.close()
-                self.server_host, self.server_port, self.server_key = host, port, key
+                self.server_scheme, self.server_host, self.server_port, self.server_key = scheme, host, port, key
                 self.reachable = False
                 self.last_ok_at: str | None = None
                 self.last_error = ""
@@ -255,7 +256,7 @@ class Agent:
 
     @property
     def is_host_server(self) -> bool:
-        return self.cfg.is_host and self.server_port == self.cfg.server_port and \
+        return self.cfg.is_host and self.server_scheme == "http" and self.server_port == self.cfg.server_port and \
             self.cfg.is_host_itself(self._ip_of(self.server_host))
 
     @staticmethod
@@ -289,7 +290,7 @@ class Agent:
         self.last_error = ""
 
     def mark_down(self, exc: Exception):
-        msg = describe_network_error(exc, self.server_host, self.server_port, self.is_host_server)
+        msg = describe_network_error(exc, self.server_host, self.server_port, self.is_host_server, self.server_scheme)
         if self.reachable or msg != self.last_error:
             self.log.warning("Servidor no disponible: %s", msg)
         self.reachable = False
@@ -297,13 +298,13 @@ class Agent:
 
     def status(self) -> dict:
         host_status = self.hooks["host_status"]() if "host_status" in self.hooks else None
-        default_host, default_port = self.cfg.default_server_address()
+        default_scheme, default_host, default_port = self.cfg.default_server_url()
         return {
             "app": APP_NAME, "version": APP_VERSION, "server": self.server_key, "server_host": self.server_host,
-            "server_label": format_server_address(self.server_host, self.server_port),
-            "server_is_default": self.server_is_default,
+            "server_label": format_server_address(self.server_host, self.server_port, self.server_scheme),
+            "server_scheme": self.server_scheme, "server_is_default": self.server_is_default,
             "default_server_label": "este equipo" if self.cfg.is_host and not self.cfg.default_server
-            else format_server_address(default_host, default_port),
+            else format_server_address(default_host, default_port, default_scheme),
             "reachable": self.reachable, "last_ok_at": self.last_ok_at, "last_error": self.last_error,
             "server_info": self.server_info, "outbox": self.outbox.items(), "pending_count": self.outbox.pending_count(),
             "is_host": self.cfg.is_host, "is_host_server": self.is_host_server, "host": host_status,
@@ -320,8 +321,10 @@ class Agent:
 
     # -- comunicación con el servidor -----------------------------------------
     def send(self, method: str, path: str, headers: dict, body: bytes | None = None,
-             body_file: str | None = None, timeout: float = 30, host: str | None = None, port: int | None = None):
-        conn = http.client.HTTPConnection(host or self.server_host, port or self.server_port, timeout=timeout)
+             body_file: str | None = None, timeout: float = 30, host: str | None = None, port: int | None = None,
+             scheme: str | None = None):
+        conn = open_connection(scheme or self.server_scheme, host or self.server_host, port or self.server_port,
+                               timeout)
         conn.putrequest(method, path, skip_accept_encoding=True)
         conn.putheader("X-DevControl-Version", APP_VERSION)
         for k, v in headers.items():
@@ -351,29 +354,32 @@ class Agent:
                 self.mark_up()
                 self.updater.note_server(self.server_info, self.update_required)
             else:
-                self.mark_down(OSError(f"El servidor respondió {resp.status}"))
+                self.mark_down(ServerAnswer(describe_bad_answer(resp.status, data)))
         except (OSError, http.client.HTTPException, ValueError) as exc:
             self.mark_down(exc)
 
     def test_server(self, server: str) -> dict:
         try:
-            host, port, _ = self.resolve(server)
+            scheme, host, port, _ = self.resolve(server)
         except ConfigError as exc:
             return {"ok": False, "message": str(exc)}
-        label = format_server_address(host, port)
+        label = format_server_address(host, port, scheme)
         try:
-            conn, resp = self.send("GET", "/api/health", {}, timeout=5, host=host, port=port)
+            conn, resp = self.send("GET", "/api/health", {}, timeout=8, host=host, port=port, scheme=scheme)
             raw = resp.read()
             conn.close()
         except (OSError, http.client.HTTPException) as exc:
-            return {"ok": False, "server_label": label, "message": describe_network_error(exc, host, port, False)}
+            return {"ok": False, "server_label": label,
+                    "message": describe_network_error(exc, host, port, False, scheme)}
         try:
             info = json.loads(raw)
         except ValueError:
             info = {}
-        if resp.status != 200 or info.get("app") != APP_NAME:
-            msg = info.get("message") or f"En {label} hay algo que no es un servidor de DEV CONTROL (respuesta {resp.status})."
-            return {"ok": False, "server_label": label, "message": msg}
+        if resp.status != 200:
+            return {"ok": False, "server_label": label, "message": describe_bad_answer(resp.status, raw)}
+        if info.get("app") != APP_NAME:
+            return {"ok": False, "server_label": label,
+                    "message": f"En {label} hay algo que no es un servidor de DEV CONTROL."}
         return {"ok": True, "server_label": label, "version": info.get("version"), "info": info}
 
     def health_loop(self):
@@ -404,6 +410,8 @@ class Agent:
                                            timeout=600 if item["body_file"] else 30)
                     raw = resp.read()
                     conn.close()
+                    if tunnel_down(resp):
+                        raise ServerAnswer(describe_bad_answer(resp.status, raw))
                 except (OSError, http.client.HTTPException) as exc:
                     self.mark_down(exc)
                     outbox.fail(item["id"], self.last_error, final=False)
@@ -511,19 +519,83 @@ class Agent:
             self.httpd.server_close()
 
 
-def describe_network_error(exc: Exception, host: str, port: int, own: bool) -> str:
+class ServerAnswer(OSError):
+    """El servidor (o Cloudflare delante de él) respondió, pero no con el estado del servidor."""
+
+
+def open_connection(scheme: str, host: str, port: int, timeout: float) -> http.client.HTTPConnection:
+    if scheme == "https":
+        return http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
+    return http.client.HTTPConnection(host, port, timeout=timeout)
+
+
+CLOUDFLARE_DOWN = {502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530}
+
+
+def tunnel_down(resp) -> bool:
+    """Respuesta de Cloudflare (no de DEV CONTROL) porque el anfitrión o cloudflared no están disponibles."""
+    if resp.status not in CLOUDFLARE_DOWN:
+        return False
+    ctype = (resp.getheader("Content-Type") or "").lower()
+    return "application/json" not in ctype
+
+
+def describe_bad_answer(status: int, raw: bytes) -> str:
+    """Mensaje comprensible cuando /api/health no devuelve 200 (p. ej. a través del túnel de Cloudflare)."""
+    try:
+        info = json.loads(raw or b"{}")
+    except ValueError:
+        info = {}
+    if isinstance(info, dict) and info.get("message"):
+        return str(info["message"])
+    if status in CLOUDFLARE_DOWN:
+        return ("La dirección de Internet existe, pero el equipo anfitrión no responde: puede estar apagado, sin "
+                "Internet o con DEV CONTROL o Cloudflare (cloudflared) cerrados.")
+    if status in (401, 403):
+        return f"El servidor rechazó la conexión (respuesta {status})."
+    return f"El servidor respondió {status}."
+
+
+def _looks_like_domain(host: str) -> bool:
+    return "." in host and ":" not in host and not host.replace(".", "").isdigit() and \
+        not host.lower().endswith((".ts.net", ".local", ".lan"))
+
+
+def describe_network_error(exc: Exception, host: str, port: int, own: bool, scheme: str = "http") -> str:
+    if isinstance(exc, ServerAnswer):
+        return str(exc)
+    if isinstance(exc, ssl.SSLError):
+        if scheme != "https":
+            return f"{host}:{port} usa conexión segura: escribe la dirección empezando por https://"
+        return f"No se pudo establecer una conexión segura con {host} ({exc.__class__.__name__}: {exc})."
+    if scheme == "https":
+        if isinstance(exc, socket.gaierror):
+            return (f"No se encuentra «{host}» en Internet. Revisa la dirección, o espera unos minutos si el "
+                    "anfitrión acaba de crearla en Cloudflare.")
+        if isinstance(exc, (socket.timeout, TimeoutError, ConnectionRefusedError)):
+            return f"No hay respuesta de {host}. Comprueba la conexión a Internet de este equipo."
+        return f"No se puede conectar con {host} ({exc.__class__.__name__}: {exc})."
     if isinstance(exc, ConnectionRefusedError):
         if own:
             return "El servidor de este equipo está detenido. Inícialo desde el icono de DEV CONTROL en la bandeja."
         return (f"El equipo {host} responde, pero DEV CONTROL no está en marcha en el puerto {port}. "
                 "Pide que se abra DEV CONTROL en el equipo anfitrión.")
     if isinstance(exc, (socket.timeout, TimeoutError)):
-        return (f"No hay respuesta de {host}. El equipo anfitrión puede estar apagado o sin conexión, o la VPN "
-                "(por ejemplo Tailscale) desconectada.")
+        msg = (f"No hay respuesta de {host}. El equipo anfitrión puede estar apagado o sin conexión, o la VPN "
+               "(por ejemplo Tailscale) desconectada.")
+        if _looks_like_domain(host):
+            msg += f" Si es una dirección de Internet (Cloudflare), escríbela con https:// delante (https://{host})."
+        return msg
     if isinstance(exc, socket.gaierror):
+        if _looks_like_domain(host):
+            return (f"No se encuentra el equipo «{host}». Revisa la dirección; si es una dirección de Internet "
+                    f"escríbela con https:// delante (https://{host}).")
         return f"No se encuentra el equipo «{host}». Revisa la dirección del servidor."
     if isinstance(exc, OSError) and getattr(exc, "errno", None) in (101, 113, 10051, 10065):
         return f"No hay ruta hasta {host}. Comprueba la conexión de red o la VPN de este equipo."
+    if isinstance(exc, (http.client.BadStatusLine, http.client.RemoteDisconnected)) and _looks_like_domain(host):
+        return (f"{host}:{port} no contestó como un servidor de DEV CONTROL. Si es una dirección de Internet, "
+                f"escríbela con https:// delante (https://{host}).")
     return f"No se puede conectar con {host}:{port} ({exc.__class__.__name__}: {exc})."
 
 
@@ -675,7 +747,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             except (OSError, http.client.HTTPException) as exc:
                 return self._json(503, {"error": "servidor_no_disponible",
                                         "message": describe_network_error(exc, agent.server_host, agent.server_port,
-                                                                          agent.is_host_server)})
+                                                                          agent.is_host_server, agent.server_scheme)})
             except ValueError as exc:
                 return self._json(400, {"error": "descarga", "message": str(exc)})
             return self._json(200, result)
@@ -787,6 +859,12 @@ class AgentHandler(BaseHTTPRequestHandler):
             and "idempotency-key" in {k.lower() for k in headers}
         outbox = agent.outbox
         try:
+            limit_mb = (agent.server_info or {}).get("max_upload_mb")
+            if body_file and isinstance(limit_mb, int) and os.path.getsize(body_file) > limit_mb * 1024 * 1024:
+                where = " a través de Internet" if (agent.server_info or {}).get("via_internet") else ""
+                return self._json(413, {"error": "demasiado_grande",
+                                        "message": f"El archivo supera el máximo de {limit_mb} MB que admite el "
+                                                   f"servidor{where}."})
             # Si ya hay operaciones en cola, las nuevas se ponen detrás para conservar el orden.
             if queueable and outbox.pending_count():
                 return self._enqueue(outbox, method, full_path, headers, body, body_file, queued_behind=True)
@@ -797,6 +875,11 @@ class AgentHandler(BaseHTTPRequestHandler):
                 timeout = 600
             try:
                 conn, resp = agent.send(method, full_path, headers, body, body_file, timeout=timeout)
+                if tunnel_down(resp):
+                    # Cloudflare responde por el anfitrión cuando este está apagado: es lo mismo que no tener conexión.
+                    raw = resp.read()
+                    conn.close()
+                    raise ServerAnswer(describe_bad_answer(resp.status, raw))
             except (OSError, http.client.HTTPException) as exc:
                 agent.mark_down(exc)
                 if queueable:
