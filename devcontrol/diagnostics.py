@@ -35,7 +35,7 @@ def run_diagnostics(layout, cfg) -> int:
     try:
         conn = (http.client.HTTPSConnection(host, port, timeout=8, context=ssl.create_default_context())
                 if scheme == "https" else http.client.HTTPConnection(host, port, timeout=5))
-        conn.request("GET", "/api/health")
+        conn.request("GET", "/api/health", headers={"User-Agent": f"DEV-CONTROL/{APP_VERSION}"})
         resp = conn.getresponse()
         info = json.loads(resp.read() or b"{}")
         conn.close()

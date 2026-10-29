@@ -327,6 +327,7 @@ class Agent:
                                timeout)
         conn.putrequest(method, path, skip_accept_encoding=True)
         conn.putheader("X-DevControl-Version", APP_VERSION)
+        conn.putheader("User-Agent", f"DEV-CONTROL/{APP_VERSION}")   # Cloudflare rechaza peticiones sin él
         for k, v in headers.items():
             conn.putheader(k, v)
         if body_file:
