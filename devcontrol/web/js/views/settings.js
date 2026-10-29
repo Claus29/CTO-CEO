@@ -403,7 +403,7 @@ async function internetTab(root, ctx) {
         h('ol', { class: 'small adm-steps' },
           step('En ', h('b', null, 'dash.cloudflare.com'), ' → ', h('b', null, 'Zero Trust'), ' → ', h('b', null, 'Networks → Tunnels'), ' → ', h('b', null, 'Create a tunnel'), ' (tipo «Cloudflared»). Ponle un nombre, por ejemplo «devcontrol».'),
           step('Elige ', h('b', null, 'Windows'), ', descarga el instalador de cloudflared y ejecuta en este equipo, como administrador, el comando que te muestra («cloudflared.exe service install …»). Queda como servicio de Windows y arranca solo.'),
-          step('En ', h('b', null, 'Public hostname'), ': subdominio ', h('b', { class: 'mono' }, 'devcontrol'), ', tu dominio, y en Service: tipo ', h('b', { class: 'mono' }, 'HTTP'), ' (no HTTPS) y URL ', h('b', { class: 'mono' }, `127.0.0.1:${cfg.port}`), ' (exactamente así; no el 8080 que Cloudflare pone de ejemplo). Guarda.'),
+          step('En ', h('b', null, 'Published application'), ' (antes «Public hostname»): Subdomain ', h('b', { class: 'mono' }, 'devcontrol'), ', tu dominio, Path vacío y en ', h('b', null, 'Service URL'), ' exactamente ', h('b', { class: 'mono' }, `http://127.0.0.1:${cfg.port}`), ' — con http, ', h('b', null, 'sin la «s»'), ', y no el 8080 del ejemplo (si te lo pide por separado: Type HTTP y URL ', h('span', { class: 'mono' }, `127.0.0.1:${cfg.port}`), '). Guarda.'),
           step('Aquí arriba escribe la dirección (https://devcontrol.tudominio.com), marca «Permitir entrar por Internet», pulsa ', h('b', null, 'Guardar'), ' y luego ', h('b', null, 'Comprobar'), '.'),
           step('Los demás, en la pantalla de inicio de sesión, escriben esa dirección en «Servidor». No tienen que instalar nada más.'))),
       h('div', { class: 'card' },

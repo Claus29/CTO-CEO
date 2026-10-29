@@ -74,7 +74,7 @@ def register(router, app):
             raise bad_request("Escribe primero la dirección (por ejemplo https://devcontrol.tudominio.com).")
         request = urllib.request.Request(address + "/api/health", headers={"User-Agent": "DEV-CONTROL-comprobacion"})
         port = getattr(app, "port", None) or app.cfg.server_port
-        service = f"tipo HTTP (no HTTPS) y URL 127.0.0.1:{port}"
+        service = f"http://127.0.0.1:{port} (con http, sin la «s»)"
         asked_at = time.time()
         status, info, raw = 0, {}, b""
         try:
@@ -92,7 +92,7 @@ def register(router, app):
             text = str(reason)
             if "Name or service not known" in text or "getaddrinfo" in text or "nodename" in text \
                     or "11001" in text or "No such host" in text:
-                msg = ("Esa dirección no existe todavía. Revisa en Cloudflare la «Public hostname» del túnel "
+                msg = ("Esa dirección no existe todavía. Revisa en Cloudflare la «Published application» del túnel "
                        "(tras crearla puede tardar unos minutos).")
             else:
                 msg = f"No se puede llegar a {address} ({text})."
@@ -114,17 +114,18 @@ def register(router, app):
             return {"ok": False, "address": address,
                     "message": f"Cloudflare no encuentra el túnel conectado ({shown}). Comprueba en Windows (services.msc) "
                                "que el servicio «Cloudflared agent» está en marcha y que en Cloudflare el túnel aparece "
-                               "como «Healthy». Si tienes varios túneles, la «Public hostname» debe estar en el que dice "
+                               "como «Healthy». Si tienes varios túneles, la «Published application» debe estar en el que dice "
                                "«Healthy»."}
         if not reached and status in (502, 503, 504, 520, 521, 522, 523, 524, 525, 526):
             return {"ok": False, "address": address,
                     "message": f"El túnel está conectado, pero cloudflared no consigue entrar en DEV CONTROL ({shown}). "
-                               f"En Cloudflare abre el túnel → «Public hostname» → Edit y deja el Service como {service}. "
-                               "Lo más habitual es haber elegido HTTPS o el puerto 8080 que Cloudflare propone de ejemplo."}
+                               f"En Cloudflare abre el túnel → «Published application» (o «Public hostname») → Edit y pon en "
+                               f"Service URL: {service}. Lo más habitual es haber puesto https:// o el puerto 8080 que "
+                               "Cloudflare propone de ejemplo."}
         if status != 200 or info.get("app") != "DEV CONTROL":
             return {"ok": False, "address": address,
-                    "message": f"Esa dirección no lleva a DEV CONTROL ({shown}). En Cloudflare, la «Public hostname» "
-                               f"debe tener el Service como {service}."}
+                    "message": f"Esa dirección no lleva a DEV CONTROL ({shown}). En Cloudflare, la «Published application» "
+                               f"(o «Public hostname») debe tener Service URL: {service}."}
         if info.get("epoch") != db.epoch:
             return {"ok": False, "address": address,
                     "message": "Esa dirección lleva a OTRO servidor de DEV CONTROL, no a este."}

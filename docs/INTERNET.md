@@ -17,11 +17,15 @@ El túnel es gratuito. Solo hace falta un dominio propio gestionado en Cloudflar
 2. Elige **Windows**, descarga el instalador de `cloudflared` e instálalo. Después abre una ventana de comandos **como
    administrador** y pega el comando que te muestra Cloudflare (`cloudflared.exe service install eyJ...`). Así queda
    como servicio de Windows: arranca solo con el equipo, aunque no inicies sesión.
-3. Pasa a **Public hostname** (o «Route traffic») y rellena:
+3. Pasa a **Published application** (en la pantalla antigua se llamaba **Public hostname**) y rellena:
    - **Subdomain**: `devcontrol`
    - **Domain**: tu dominio
-   - **Service**: tipo `HTTP`, URL `127.0.0.1:8765` (el puerto de `[servidor] puerto` en `config.ini`; el panel
-     de DEV CONTROL te muestra el correcto).
+   - **Path**: vacío
+   - **Service URL**: `http://127.0.0.1:8765` — con `http`, **sin la «s»**, y no el `8080` del ejemplo. Es el puerto
+     de `[servidor] puerto` en `config.ini`; el panel de DEV CONTROL te muestra el correcto. (En la pantalla antigua,
+     **Type** `HTTP` y **URL** `127.0.0.1:8765`.)
+
+     DEV CONTROL habla HTTP normal dentro de tu PC; la parte segura (https) la pone Cloudflare hacia Internet.
 
    Guarda. El túnel debe aparecer como **Healthy**.
 4. En DEV CONTROL: **Ajustes → Acceso por Internet**. Escribe la dirección (`https://devcontrol.tudominio.com`), marca
@@ -68,9 +72,9 @@ los administradores reciben un aviso.
 
 | Mensaje | Qué hacer |
 |---|---|
-| «Esa dirección no existe todavía» | Revisa la *Public hostname* en Cloudflare. Tras crearla puede tardar unos minutos. |
-| «Cloudflare no encuentra el túnel conectado» (530 / 1033) | El servicio `Cloudflared agent` no está en marcha: en `services.msc` inícialo, o repite el paso 2. Si tienes varios túneles, la *Public hostname* debe estar en el que aparece «Healthy». |
-| «El túnel está conectado, pero cloudflared no consigue entrar en DEV CONTROL» (502) | El túnel sale «Healthy» pero la *Public hostname* apunta mal. Edítala: Service tipo `HTTP` (no `HTTPS`) y URL `127.0.0.1:8765` (no el `8080` del ejemplo). |
-| «Esa dirección no lleva a DEV CONTROL» | La *Public hostname* debe apuntar a `HTTP` · `127.0.0.1:8765`. |
+| «Esa dirección no existe todavía» | Revisa la *Published application* en Cloudflare. Tras crearla puede tardar unos minutos. |
+| «Cloudflare no encuentra el túnel conectado» (530 / 1033) | El servicio `Cloudflared agent` no está en marcha: en `services.msc` inícialo, o repite el paso 2. Si tienes varios túneles, la *Published application* debe estar en el que aparece «Healthy». |
+| «El túnel está conectado, pero cloudflared no consigue entrar en DEV CONTROL» (502) | El túnel sale «Healthy» pero la *Published application* apunta mal. Edítala: Service URL `http://127.0.0.1:8765` (no `https://`, no el `8080` del ejemplo). |
+| «Esa dirección no lleva a DEV CONTROL» | La *Published application* debe tener Service URL `http://127.0.0.1:8765`. |
 | «El túnel funciona… pero el acceso está desactivado» | Marca «Permitir entrar por Internet» y guarda. |
 | El miembro ve «No hay respuesta de devcontrol…» | Ha escrito la dirección sin `https://` delante. |

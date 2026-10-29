@@ -117,7 +117,7 @@ def test_check_button_explains_each_situation(admin, server, monkeypatch):
     monkeypatch.setattr(internet, "_urlopen", origin_unreachable)
     r = admin.post("/api/internet/test")
     assert r["ok"] is False and "no consigue entrar en DEV CONTROL" in r["message"]
-    assert f"HTTP (no HTTPS) y URL 127.0.0.1:{server.port}" in r["message"]
+    assert f"Service URL: http://127.0.0.1:{server.port} (con http, sin la «s»)" in r["message"]
 
 
 # ---------- miembro: direcciones https ----------

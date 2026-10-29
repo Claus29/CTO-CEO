@@ -8,6 +8,8 @@ Todas las versiones siguen [versionado semántico](https://semver.org/lang/es/).
   «Public hostname» apuntaba mal (HTTPS en vez de HTTP, o el puerto 8080 del ejemplo), decía que no encontraba el
   túnel. Ahora distingue «el túnel no está conectado» (error 530/1033) de «el túnel está conectado pero no llega a
   DEV CONTROL» (error 502), indica el código de Cloudflare y la configuración exacta que hay que poner.
+- Instrucciones adaptadas a la pantalla nueva de Cloudflare («Published application» con un solo campo «Service URL»):
+  hay que poner `http://127.0.0.1:8765`, con http y sin la «s».
 
 ## [2.5.0] - 2026-10-29
 
