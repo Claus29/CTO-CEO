@@ -69,7 +69,8 @@ los administradores reciben un aviso.
 | Mensaje | Qué hacer |
 |---|---|
 | «Esa dirección no existe todavía» | Revisa la *Public hostname* en Cloudflare. Tras crearla puede tardar unos minutos. |
-| «Cloudflare no encuentra el túnel en este PC» | El servicio `cloudflared` no está en marcha: en `services.msc` inícialo, o repite el paso 2. |
-| «Esa dirección no lleva a DEV CONTROL» | La *Public hostname* debe apuntar a `HTTP` · `127.0.0.1:8765` (no `https`). |
+| «Cloudflare no encuentra el túnel conectado» (530 / 1033) | El servicio `Cloudflared agent` no está en marcha: en `services.msc` inícialo, o repite el paso 2. Si tienes varios túneles, la *Public hostname* debe estar en el que aparece «Healthy». |
+| «El túnel está conectado, pero cloudflared no consigue entrar en DEV CONTROL» (502) | El túnel sale «Healthy» pero la *Public hostname* apunta mal. Edítala: Service tipo `HTTP` (no `HTTPS`) y URL `127.0.0.1:8765` (no el `8080` del ejemplo). |
+| «Esa dirección no lleva a DEV CONTROL» | La *Public hostname* debe apuntar a `HTTP` · `127.0.0.1:8765`. |
 | «El túnel funciona… pero el acceso está desactivado» | Marca «Permitir entrar por Internet» y guarda. |
 | El miembro ve «No hay respuesta de devcontrol…» | Ha escrito la dirección sin `https://` delante. |

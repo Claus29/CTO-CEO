@@ -75,7 +75,7 @@ def test_host_only_actions_are_refused_through_the_tunnel(admin, server):
 
 def test_internet_settings_need_permission_and_a_clean_address(admin, server):
     st = enable_internet(admin)
-    assert st == {"enabled": True, "address": "https://devcontrol.ejemplo.com", "port": server.cfg.server_port}
+    assert st == {"enabled": True, "address": "https://devcontrol.ejemplo.com", "port": server.port}
     for bad in ("https://devcontrol.ejemplo.com/ruta", "ftp://x", "https://a b.com"):
         assert admin.call("PUT", "/api/internet", {"address": bad})[0] == 400
     pid = admin.get("/api/me")["projects"][0]["id"]
@@ -107,7 +107,17 @@ def test_check_button_explains_each_situation(admin, server, monkeypatch):
 
     monkeypatch.setattr(internet, "_urlopen", cloudflare_down)
     r = admin.post("/api/internet/test")
-    assert r["ok"] is False and "cloudflared" in r["message"]
+    assert r["ok"] is False and "no encuentra el túnel conectado" in r["message"] and "1033" in r["message"]
+
+    def origin_unreachable(request, timeout=None):
+        # El túnel está «Healthy» pero la Public hostname apunta a otro sitio (HTTPS, puerto 8080...): cloudflared da 502.
+        page = b"<html><title>Bad gateway</title><span>Error code 502</span> Host Error</html>"
+        raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, io.BytesIO(page))
+
+    monkeypatch.setattr(internet, "_urlopen", origin_unreachable)
+    r = admin.post("/api/internet/test")
+    assert r["ok"] is False and "no consigue entrar en DEV CONTROL" in r["message"]
+    assert f"HTTP (no HTTPS) y URL 127.0.0.1:{server.port}" in r["message"]
 
 
 # ---------- miembro: direcciones https ----------

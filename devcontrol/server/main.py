@@ -210,6 +210,7 @@ class ServerApp:
     def dispatch(self, handler: BaseHandler, req) -> Response:
         started = time.monotonic()
         if req.via_internet:
+            self.tunnel_seen_at = time.time()   # para que «Comprobar» sepa si cloudflared llega hasta aquí
             # Por el túnel de Cloudflare solo se entra si el anfitrión lo ha activado (Ajustes → Acceso por Internet).
             if self.db is None or not self.settings_cache("internet_access"):
                 raise HttpError(403, "internet_desactivado",

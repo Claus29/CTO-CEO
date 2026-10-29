@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 
@@ -29,12 +30,18 @@ def normalize_address(value: str) -> str:
     return value.lower()
 
 
+def cloudflare_code(raw: bytes) -> str:
+    """Número de error de las páginas de Cloudflare («Error code 1033», «error code: 502»)."""
+    m = re.search(rb"[Ee]rror(?: code)?:?\s*(\d{3,4})", raw[:20000] if raw else b"")
+    return m.group(1).decode() if m else ""
+
+
 def register(router, app):
     db = app.db
 
     def state() -> dict:
         return {"enabled": bool(db.get_setting("internet_access")), "address": db.get_setting("internet_address") or "",
-                "port": app.cfg.server_port}
+                "port": getattr(app, "port", None) or app.cfg.server_port}
 
     @router.route("GET", "/api/internet", perm="sistema.ajustes")
     def get_internet(req):
@@ -66,37 +73,58 @@ def register(router, app):
         if not address:
             raise bad_request("Escribe primero la dirección (por ejemplo https://devcontrol.tudominio.com).")
         request = urllib.request.Request(address + "/api/health", headers={"User-Agent": "DEV-CONTROL-comprobacion"})
-        status, info = 0, {}
+        port = getattr(app, "port", None) or app.cfg.server_port
+        service = f"tipo HTTP (no HTTPS) y URL 127.0.0.1:{port}"
+        asked_at = time.time()
+        status, info, raw = 0, {}, b""
         try:
-            with _urlopen(request, timeout=12) as resp:
+            with _urlopen(request, timeout=15) as resp:
                 status = resp.status
-                info = json.loads(resp.read() or b"{}")
+                raw = resp.read()
         except urllib.error.HTTPError as exc:
             status = exc.code
             try:
-                info = json.loads(exc.read() or b"{}")
-            except ValueError:
-                info = {}
+                raw = exc.read() or b""
+            except OSError:
+                raw = b""
         except (urllib.error.URLError, OSError, ValueError) as exc:
             reason = getattr(exc, "reason", exc)
             text = str(reason)
-            if "Name or service not known" in text or "getaddrinfo" in text or "nodename" in text:
-                msg = "Esa dirección no existe todavía. Revisa en Cloudflare la «Public hostname» del túnel."
+            if "Name or service not known" in text or "getaddrinfo" in text or "nodename" in text \
+                    or "11001" in text or "No such host" in text:
+                msg = ("Esa dirección no existe todavía. Revisa en Cloudflare la «Public hostname» del túnel "
+                       "(tras crearla puede tardar unos minutos).")
             else:
                 msg = f"No se puede llegar a {address} ({text})."
             return {"ok": False, "address": address, "message": msg}
+        try:
+            info = json.loads(raw or b"{}")
+        except ValueError:
+            info = {}
+        if not isinstance(info, dict):
+            info = {}
+        reached = getattr(app, "tunnel_seen_at", 0) >= asked_at   # la petición llegó a DEV CONTROL por el túnel
+        code = cloudflare_code(raw)
+        shown = f"respuesta {status}" + (f", error {code} de Cloudflare" if code and code != str(status) else "")
         if status == 403 and info.get("error") == "internet_desactivado":
             return {"ok": False, "tunnel_ok": True, "address": address,
                     "message": "El túnel funciona y llega a este equipo, pero el acceso por Internet está desactivado. "
-                               "Actívalo con el interruptor."}
-        if status in (502, 503, 504, 521, 522, 523, 524, 530, 1033):
+                               "Marca «Permitir entrar por Internet» y pulsa Guardar."}
+        if not reached and (status == 530 or code in ("1033", "1016")):
             return {"ok": False, "address": address,
-                    "message": "Cloudflare no encuentra el túnel en este PC. Comprueba que el servicio «cloudflared» "
-                               "está instalado y en marcha, y que el túnel aparece como «Healthy»."}
+                    "message": f"Cloudflare no encuentra el túnel conectado ({shown}). Comprueba en Windows (services.msc) "
+                               "que el servicio «Cloudflared agent» está en marcha y que en Cloudflare el túnel aparece "
+                               "como «Healthy». Si tienes varios túneles, la «Public hostname» debe estar en el que dice "
+                               "«Healthy»."}
+        if not reached and status in (502, 503, 504, 520, 521, 522, 523, 524, 525, 526):
+            return {"ok": False, "address": address,
+                    "message": f"El túnel está conectado, pero cloudflared no consigue entrar en DEV CONTROL ({shown}). "
+                               f"En Cloudflare abre el túnel → «Public hostname» → Edit y deja el Service como {service}. "
+                               "Lo más habitual es haber elegido HTTPS o el puerto 8080 que Cloudflare propone de ejemplo."}
         if status != 200 or info.get("app") != "DEV CONTROL":
             return {"ok": False, "address": address,
-                    "message": f"Esa dirección no lleva a DEV CONTROL (respuesta {status}). En Cloudflare, la "
-                               f"«Public hostname» debe apuntar a HTTP · 127.0.0.1:{app.cfg.server_port}."}
+                    "message": f"Esa dirección no lleva a DEV CONTROL ({shown}). En Cloudflare, la «Public hostname» "
+                               f"debe tener el Service como {service}."}
         if info.get("epoch") != db.epoch:
             return {"ok": False, "address": address,
                     "message": "Esa dirección lleva a OTRO servidor de DEV CONTROL, no a este."}
